@@ -1,0 +1,43 @@
+name: Deploy to Vercel (Prebuilt)
+
+on:
+  push:
+    branches:
+      - main # 每次推送到 main 分支时自动触发
+  workflow_dispatch: # 允许在 GitHub 网页上手动点击运行
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  Deploy-to-Vercel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Code (拉取代码)
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js (配置环境)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 3. Setup PNPM (配置官方包管理器)
+        uses: pnpm/action-setup@v3
+        with:
+          version: latest
+
+      - name: 4. Install dependencies (安装依赖)
+        run: pnpm install
+
+      - name: 5. Install Vercel CLI (安装 Vercel 命令行)
+        run: npm install --global vercel@latest
+
+      - name: 6. Pull Vercel Environment (拉取 Vercel 线上环境变量)
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: 7. Build Project Artifacts (在 GitHub 上进行打包)
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: 8. Deploy to Vercel (将成品直接上传给 Vercel！)
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
