@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
 
-import { NetworkConnectionError, PageNotFoundError, TimeoutError } from '../errorType';
+import {
+  HTTPStatusError,
+  InvalidUrlError,
+  isFetchNetworkError,
+  isRetryableCrawlError,
+  NetworkConnectionError,
+  PageNotFoundError,
+  TimeoutError,
+  toFetchError,
+  UnsupportedContentError,
+} from '../errorType';
 
 describe('errorType', () => {
   describe('PageNotFoundError', () => {
@@ -170,6 +180,43 @@ describe('errorType', () => {
     });
   });
 
+  describe('isFetchNetworkError', () => {
+    it('should return true for TypeError with "fetch failed" message', () => {
+      expect(isFetchNetworkError(new TypeError('fetch failed'))).toBe(true);
+    });
+
+    it('should return false for plain Error with "fetch failed" message', () => {
+      expect(isFetchNetworkError(new Error('fetch failed'))).toBe(false);
+    });
+
+    it('should return false for TypeError with different message', () => {
+      expect(isFetchNetworkError(new TypeError('something else'))).toBe(false);
+    });
+
+    it('should return false for non-error values', () => {
+      expect(isFetchNetworkError('fetch failed')).toBe(false);
+      expect(isFetchNetworkError(null)).toBe(false);
+      expect(isFetchNetworkError(undefined)).toBe(false);
+    });
+  });
+
+  describe('toFetchError', () => {
+    it('should return NetworkConnectionError for fetch network errors', () => {
+      const result = toFetchError(new TypeError('fetch failed'));
+      expect(result).toBeInstanceOf(NetworkConnectionError);
+    });
+
+    it('should return TimeoutError as-is', () => {
+      const timeout = new TimeoutError('Request timeout after 10000ms');
+      expect(toFetchError(timeout)).toBe(timeout);
+    });
+
+    it('should return unknown errors unchanged', () => {
+      const unknown = new Error('something unexpected');
+      expect(toFetchError(unknown)).toBe(unknown);
+    });
+  });
+
   describe('error catching scenarios', () => {
     it('should allow catching specific error types', () => {
       const testErrors = [
@@ -192,7 +239,7 @@ describe('errorType', () => {
             expect(e.name).toBe('TimeoutError');
             expect(e.message).toBe('timeout error');
           } else {
-            throw new Error('Unexpected error type');
+            throw new Error('Unexpected error type', { cause: e });
           }
         }
       });
@@ -213,5 +260,30 @@ describe('errorType', () => {
         }
       });
     });
+  });
+});
+
+describe('isRetryableCrawlError', () => {
+  it('should never retry authoritative failures', () => {
+    expect(isRetryableCrawlError(new PageNotFoundError('Not Found'))).toBe(false);
+    expect(isRetryableCrawlError(new PageNotFoundError('Gone', 410))).toBe(false);
+    expect(isRetryableCrawlError(new InvalidUrlError('bad'))).toBe(false);
+    expect(isRetryableCrawlError(new UnsupportedContentError('svg'))).toBe(false);
+  });
+
+  it('should not retry provider 4xx rejections except 408/429', () => {
+    expect(isRetryableCrawlError(new HTTPStatusError('400', 400))).toBe(false);
+    expect(isRetryableCrawlError(new HTTPStatusError('401', 401))).toBe(false);
+    expect(isRetryableCrawlError(new HTTPStatusError('422', 422))).toBe(false);
+    expect(isRetryableCrawlError(new HTTPStatusError('408', 408))).toBe(true);
+    expect(isRetryableCrawlError(new HTTPStatusError('429', 429))).toBe(true);
+  });
+
+  it('should retry transient failures', () => {
+    expect(isRetryableCrawlError(new HTTPStatusError('502', 502))).toBe(true);
+    expect(isRetryableCrawlError(new NetworkConnectionError())).toBe(true);
+    expect(isRetryableCrawlError(new TimeoutError('timeout'))).toBe(true);
+    expect(isRetryableCrawlError(new Error('unknown'))).toBe(true);
+    expect(isRetryableCrawlError(undefined)).toBe(true);
   });
 });

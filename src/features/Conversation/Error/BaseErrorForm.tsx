@@ -1,5 +1,7 @@
-import { Block, Flexbox, Text } from '@lobehub/ui';
-import { type ReactNode, memo } from 'react';
+import { Block, Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
+import { type ReactNode } from 'react';
+import { memo } from 'react';
 
 interface BaseErrorFormProps {
   action?: ReactNode;
@@ -10,19 +12,19 @@ interface BaseErrorFormProps {
 const BaseErrorForm = memo<BaseErrorFormProps>(({ title, desc, action, avatar }) => {
   return (
     <Block
+      horizontal
       align={'center'}
       gap={8}
-      horizontal
       justify={'space-between'}
       padding={16}
+      variant={'outlined'}
       style={{
         overflow: 'hidden',
         position: 'relative',
         width: '100%',
       }}
-      variant={'outlined'}
     >
-      <Flexbox align="center" gap={12} horizontal>
+      <Flexbox horizontal align="center" gap={12}>
         {avatar}
         <Flexbox gap={2}>
           <Text weight={500}>{title}</Text>

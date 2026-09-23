@@ -1,5 +1,7 @@
-import dayjs, { Dayjs } from 'dayjs';
-import { SQL, and, gte, lte } from 'drizzle-orm';
+import type { Dayjs } from 'dayjs';
+import dayjs from 'dayjs';
+import type { SQL } from 'drizzle-orm';
+import { and, gte, lte } from 'drizzle-orm';
 
 export const genWhere = (sqls: (SQL<any> | undefined)[]): SQL<any> | undefined => {
   const where = sqls.filter(Boolean);
@@ -16,13 +18,20 @@ export const genStartDateWhere = (
   return gte(key, format(dayjs(new Date(date))));
 };
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
 export const genEndDateWhere = (
   date: string | undefined,
   key: any,
   format: (date: Dayjs) => any,
 ): SQL | undefined => {
   if (!date || !dayjs(date).isValid()) return;
-  return lte(key, format(dayjs(new Date(date)).add(1, 'day')));
+  // A date-only value means "through the end of that day", so push the bound
+  // one day forward; a precise timestamp is used as the exact upper bound.
+  const end = DATE_ONLY.test(date.trim())
+    ? dayjs(new Date(date)).add(1, 'day')
+    : dayjs(new Date(date));
+  return lte(key, format(end));
 };
 
 export const genRangeWhere = (

@@ -1,54 +1,76 @@
+import { LobeActivatorIdentifier } from '@lobechat/builtin-tool-activator';
 import { AgentBuilderIdentifier } from '@lobechat/builtin-tool-agent-builder';
-import { GroupAgentBuilderIdentifier } from '@lobechat/builtin-tool-group-agent-builder';
-import { GTDIdentifier } from '@lobechat/builtin-tool-gtd';
-import { KLAVIS_SERVER_TYPES, LOBEHUB_SKILL_PROVIDERS, isDesktop } from '@lobechat/const';
-import {
-  type AgentBuilderContext,
-  type AgentGroupConfig,
-  type GTDConfig,
-  type GroupAgentBuilderContext,
-  type GroupOfficialToolItem,
-  type LobeToolManifest,
-  MessagesEngine,
+import { isDesktop } from '@lobechat/const';
+import type {
+  AgentGroupConfig,
+  LobeToolManifest,
+  MemoryContext,
+  OperationSkillSet,
+  ToolDiscoveryConfig,
+  UserMemoryData,
 } from '@lobechat/context-engine';
+import { type ContextSnapshot, gatherContextFacts, runContextEngineering } from '@lobechat/mecha';
 import { historySummaryPrompt } from '@lobechat/prompts';
 import {
   type OpenAIChatMessage,
+  type RuntimeAdditionalContextFragment,
   type RuntimeInitialContext,
   type RuntimeStepContext,
   type UIChatMessage,
 } from '@lobechat/types';
 import debug from 'debug';
 
+import { getActiveWorkspaceId } from '@/business/client/hooks/useActiveWorkspaceId';
 import { isCanUseFC } from '@/helpers/isCanUseFC';
-import { VARIABLE_GENERATORS } from '@/helpers/parserPlaceholder';
-import { notebookService } from '@/services/notebook';
+import { HOST_VARIABLE_GENERATORS } from '@/helpers/parserPlaceholder';
 import { getAgentStoreState } from '@/store/agent';
-import { agentSelectors } from '@/store/agent/selectors';
+import {
+  agentByIdSelectors,
+  agentChatConfigSelectors,
+  agentSelectors,
+} from '@/store/agent/selectors';
 import { getChatGroupStoreState } from '@/store/agentGroup';
 import { agentGroupSelectors } from '@/store/agentGroup/selectors';
 import { getChatStoreState } from '@/store/chat';
 import { getToolStoreState } from '@/store/tool';
-import {
-  builtinToolSelectors,
-  klavisStoreSelectors,
-  lobehubSkillStoreSelectors,
-} from '@/store/tool/selectors';
+import { toolSelectors } from '@/store/tool/selectors';
+import { useUserStore } from '@/store/user';
+import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
-import { isCanUseVideo, isCanUseVision } from '../helper';
 import {
-  combineUserMemoryData,
-  resolveGlobalIdentities,
-  resolveTopicMemories,
-} from './memoryManager';
+  getRuntimeModelDisplayName,
+  getRuntimeModelKnowledgeCutoff,
+  isCanUseAudio,
+  isCanUseVideo,
+  isCanUseVision,
+} from '../helper';
+import {
+  type BrowserShareVisitor,
+  createBrowserContextFactProviders,
+  resolveBrowserConnectorFeatures,
+} from './contextFactProviders';
+import { combineUserMemoryData, resolveTopicMemories, resolveUserPersona } from './memoryManager';
+import { resolveClientSkills } from './skillEngineering';
 
 const log = debug('context-engine:contextEngineering');
 
 interface ContextEngineeringContext {
-  /** Agent Builder context for injecting current agent info */
-  agentBuilderContext?: AgentBuilderContext;
+  /** Agent-materialized presentation contexts for this LLM call */
+  additionalContexts?: readonly RuntimeAdditionalContextFragment[];
   /** The agent ID that will respond (for group context injection) */
   agentId?: string;
+  /**
+   * Identifiers the agent has explicitly disabled (`agents.plugins` tri-state).
+   * Excluded from the client skill candidate pool entirely — not just left
+   * out of `plugins` (pinned) — so a disabled skill is neither listed in
+   * `<available_skills>` nor resolvable by name via `activateSkill`.
+   */
+  disabledPluginIds?: string[];
+  /**
+   * Runtime-resolved agent mode. Callers may force chat mode for models without
+   * function calling while keeping the stored chatConfig unchanged.
+   */
+  enableAgentMode?: boolean;
   enableHistoryCount?: boolean;
   enableUserMemories?: boolean;
   /** Group ID for multi-agent scenarios */
@@ -63,10 +85,20 @@ interface ContextEngineeringContext {
   inputTemplate?: string;
   /** Tool manifests with systemRole and API definitions */
   manifests?: LobeToolManifest[];
+  /** Memory-related context for prompt/runtime behavior */
+  memoryContext?: MemoryContext;
   messages: UIChatMessage[];
   model: string;
+  /** Agent's enabled plugin/tool/skill identifiers (from agentConfig.plugins) */
+  plugins?: string[];
   provider: string;
   sessionId?: string;
+  /**
+   * Present only when the run answers a share visitor. The shared rules then
+   * withhold the creator's documents, onboarding profile and workspace links
+   * and resolve topic references against the visitor's own conversations.
+   */
+  shareVisitor?: BrowserShareVisitor;
   /**
    * Step context from Agent Runtime
    * Contains latest XML structure updated each step
@@ -74,12 +106,13 @@ interface ContextEngineeringContext {
   stepContext?: RuntimeStepContext;
   systemRole?: string;
   tools?: string[];
-  /** Topic ID for GTD context injection */
+  /** Topic ID for plan/todo context injection */
   topicId?: string;
 }
 
 // REVIEW: Maybe we can constrain identity, preference, exp to reorder or trim the context instead of passing everything in
 export const contextEngineering = async ({
+  additionalContexts,
   messages = [],
   manifests,
   tools,
@@ -91,22 +124,18 @@ export const contextEngineering = async ({
   enableHistoryCount,
   historyCount,
   historySummary,
-  agentBuilderContext,
   agentId,
+  disabledPluginIds,
+  enableAgentMode,
   groupId,
   initialContext,
+  plugins,
+  shareVisitor,
   stepContext,
   topicId,
+  memoryContext,
 }: ContextEngineeringContext): Promise<OpenAIChatMessage[]> => {
   log('tools: %o', tools);
-
-  // Check if Agent Builder tool is enabled
-  const isAgentBuilderEnabled = tools?.includes(AgentBuilderIdentifier) ?? false;
-  // Check if Group Agent Builder tool is enabled
-  const isGroupAgentBuilderEnabled = tools?.includes(GroupAgentBuilderIdentifier) ?? false;
-
-  log('isAgentBuilderEnabled: %s', isAgentBuilderEnabled);
-  log('isGroupAgentBuilderEnabled: %s', isGroupAgentBuilderEnabled);
 
   // Build agent group configuration if groupId is provided
   let agentGroup: AgentGroupConfig | undefined;
@@ -150,121 +179,12 @@ export const contextEngineering = async ({
     }
   }
 
-  // Get agent store state (used for both group agent builder context and file/knowledge base)
+  // Agent store state: chat mode, knowledge and identity of the responding agent.
   const agentStoreState = getAgentStoreState();
-
-  // Build group agent builder context if Group Agent Builder is enabled
-  // Note: Uses activeGroupId from chatStore to get the group being edited
-  let groupAgentBuilderContext: GroupAgentBuilderContext | undefined;
-  if (isGroupAgentBuilderEnabled) {
-    const activeGroupId = getChatStoreState().activeGroupId;
-    if (activeGroupId) {
-      const groupStoreState = getChatGroupStoreState();
-      const activeGroupDetail = agentGroupSelectors.getGroupById(activeGroupId)(groupStoreState);
-
-      if (activeGroupDetail) {
-        // Get supervisor agent config if supervisorAgentId exists
-        let supervisorConfig: GroupAgentBuilderContext['supervisorConfig'];
-        let enabledPlugins: string[] = [];
-        if (activeGroupDetail.supervisorAgentId) {
-          const supervisorAgentConfig = agentSelectors.getAgentConfigById(
-            activeGroupDetail.supervisorAgentId,
-          )(agentStoreState);
-          supervisorConfig = {
-            model: supervisorAgentConfig.model,
-            plugins: supervisorAgentConfig.plugins,
-            provider: supervisorAgentConfig.provider,
-          };
-          enabledPlugins = supervisorAgentConfig.plugins || [];
-        }
-
-        // Build official tools list (builtin tools + Klavis tools)
-        const toolState = getToolStoreState();
-        const officialTools: GroupOfficialToolItem[] = [];
-
-        // Get builtin tools (excluding Klavis tools)
-        const builtinTools = builtinToolSelectors.metaList(toolState);
-        const klavisIdentifiers = new Set(KLAVIS_SERVER_TYPES.map((t) => t.identifier));
-
-        for (const tool of builtinTools) {
-          // Skip Klavis tools in builtin list (they'll be shown separately)
-          if (klavisIdentifiers.has(tool.identifier)) continue;
-
-          officialTools.push({
-            description: tool.meta?.description,
-            enabled: enabledPlugins.includes(tool.identifier),
-            identifier: tool.identifier,
-            installed: true,
-            name: tool.meta?.title || tool.identifier,
-            type: 'builtin',
-          });
-        }
-
-        // Get Klavis tools (if enabled)
-        const isKlavisEnabled =
-          typeof window !== 'undefined' &&
-          window.global_serverConfigStore?.getState()?.serverConfig?.enableKlavis;
-
-        if (isKlavisEnabled) {
-          const allKlavisServers = klavisStoreSelectors.getServers(toolState);
-
-          for (const klavisType of KLAVIS_SERVER_TYPES) {
-            const server = allKlavisServers.find((s) => s.identifier === klavisType.identifier);
-
-            officialTools.push({
-              description: `LobeHub Mcp Server: ${klavisType.label}`,
-              enabled: enabledPlugins.includes(klavisType.identifier),
-              identifier: klavisType.identifier,
-              installed: !!server,
-              name: klavisType.label,
-              type: 'klavis',
-            });
-          }
-        }
-
-        // Get LobehubSkill providers (if enabled)
-        const isLobehubSkillEnabled =
-          typeof window !== 'undefined' &&
-          window.global_serverConfigStore?.getState()?.serverConfig?.enableLobehubSkill;
-
-        if (isLobehubSkillEnabled) {
-          const allLobehubSkillServers = lobehubSkillStoreSelectors.getServers(toolState);
-
-          for (const provider of LOBEHUB_SKILL_PROVIDERS) {
-            const server = allLobehubSkillServers.find((s) => s.identifier === provider.id);
-
-            officialTools.push({
-              description: `LobeHub Skill Provider: ${provider.label}`,
-              enabled: enabledPlugins.includes(provider.id),
-              identifier: provider.id,
-              installed: !!server,
-              name: provider.label,
-              type: 'lobehub-skill',
-            });
-          }
-        }
-
-        groupAgentBuilderContext = {
-          config: {
-            openingMessage: activeGroupDetail.config?.openingMessage || undefined,
-            openingQuestions: activeGroupDetail.config?.openingQuestions,
-            systemPrompt: activeGroupDetail.config?.systemPrompt || undefined,
-          },
-          groupId: activeGroupId,
-          groupTitle: activeGroupDetail.title || undefined,
-          members: activeGroupDetail.agents?.map((agent) => ({
-            description: agent.description || undefined,
-            id: agent.id,
-            isSupervisor: agent.isSupervisor,
-            title: agent.title || 'Untitled Agent',
-          })),
-          officialTools,
-          supervisorConfig,
-        };
-        log('groupAgentBuilderContext built from activeGroupId: %o', groupAgentBuilderContext);
-      }
-    }
-  }
+  // Example: preset-task calls omit `enableAgentMode`; preserve explicit chat mode
+  // from stored config instead of letting MessagesEngine treat `undefined` as agent mode.
+  const effectiveEnableAgentMode =
+    enableAgentMode ?? agentChatConfigSelectors.currentChatConfig(agentStoreState).enableAgentMode;
 
   // Get enabled agent files with content and knowledge bases from agent store
   const agentFiles = agentSelectors.currentAgentFiles(agentStoreState);
@@ -278,134 +198,178 @@ export const contextEngineering = async ({
     .filter((kb) => kb.enabled)
     .map((kb) => ({ description: kb.description, id: kb.id, name: kb.name }));
 
-  // Resolve user memories: topic memories and global identities are independent layers
+  // Resolve user memories: topic memories and user persona are independent layers
   // Both functions now read from cache only (no network requests) to avoid blocking sendMessage
-  let userMemoryData;
+  let userMemoryData: UserMemoryData | undefined;
   if (enableUserMemories) {
     const topicMemories = resolveTopicMemories();
-    const globalIdentities = resolveGlobalIdentities();
-    userMemoryData = combineUserMemoryData(topicMemories, globalIdentities);
+    const persona = resolveUserPersona();
+    userMemoryData = combineUserMemoryData(topicMemories, persona);
   }
 
-  // Resolve GTD context: plan and todos
-  // GTD tool must be enabled and topicId must be provided
-  const isGTDEnabled = tools?.includes(GTDIdentifier) ?? false;
-  let gtdConfig: GTDConfig | undefined;
+  const userMemoryConfig =
+    enableUserMemories && userMemoryData
+      ? {
+          enabled: enableUserMemories,
+          memories: userMemoryData,
+        }
+      : undefined;
 
-  if (isGTDEnabled && topicId) {
-    try {
-      // Fetch plan document for the current topic
-      const planResult = await notebookService.listDocuments({
-        topicId,
-        type: 'agent/plan',
-      });
+  // Build tool discovery config if lobe-activator is enabled
+  const enabledToolSet = new Set(tools || []);
+  const isLobeToolsEnabled = enabledToolSet.has(LobeActivatorIdentifier);
 
-      if (planResult.data.length > 0) {
-        const planDoc = planResult.data[0]; // Most recent plan
+  let toolDiscoveryConfig: ToolDiscoveryConfig | undefined;
+  if (isLobeToolsEnabled) {
+    const toolState = getToolStoreState();
+    const availableTools = toolSelectors
+      .availableToolsForDiscovery(toolState)
+      .filter((tool) => !enabledToolSet.has(tool.identifier));
 
-        // Build plan object for injection
-        const plan = {
-          completed: false, // TODO: Add completed field to document if needed
-          context: planDoc.content ?? undefined,
-          createdAt: planDoc.createdAt.toISOString(),
-          description: planDoc.description || '',
-          goal: planDoc.title || '',
-          id: planDoc.id,
-          updatedAt: planDoc.updatedAt.toISOString(),
-        };
-
-        // Get todos from plan's metadata
-        const todos = planDoc.metadata?.todos;
-
-        gtdConfig = {
-          enabled: true,
-          plan,
-          todos,
-        };
-
-        log('GTD context resolved: plan=%s, todos=%o', plan.goal, todos?.items?.length ?? 0);
-      }
-    } catch (error) {
-      // Silently fail - GTD context is optional
-      log('Failed to resolve GTD context:', error);
+    if (availableTools.length > 0) {
+      toolDiscoveryConfig = { availableTools };
+      log('Tool discovery config built, available tools count: %d', availableTools.length);
     }
   }
 
-  // Create MessagesEngine with injected dependencies
-  /* eslint-disable sort-keys-fix/sort-keys-fix */
-  const engine = new MessagesEngine({
-    // Agent configuration
-    enableHistoryCount,
-    formatHistorySummary: historySummaryPrompt,
-    historyCount,
-    historySummary,
-    inputTemplate,
-    systemRole,
-
-    // Capability injection
-    capabilities: {
-      isCanUseFC,
-      isCanUseVideo,
-      isCanUseVision,
-    },
-
-    // File context configuration
-    fileContext: { enabled: true, includeFileUrl: !isDesktop },
-
-    // Knowledge injection
-    knowledge: {
-      fileContents,
-      knowledgeBases,
-    },
-
-    // Messages
-    messages,
-
-    // Model info
-    model,
-    provider,
-
-    // runtime context
-    initialContext,
-    stepContext,
-
-    // Tools configuration
-    toolsConfig: {
-      manifests,
-      tools,
-    },
-
-    // User memory configuration
-    userMemory:
-      enableUserMemories && userMemoryData
-        ? {
-            enabled: enableUserMemories,
-            memories: userMemoryData,
-          }
+  // Which facts this turn needs (plan, references, builder contexts, agent
+  // management, credentials, connectors, onboarding, workspace links) is
+  // decided by the shared rules; the browser only answers the lookups they
+  // ask for, from the stores first.
+  const chatStoreState = getChatStoreState();
+  const agentConfig = agentId
+    ? agentSelectors.getAgentConfigById(agentId)(agentStoreState)
+    : undefined;
+  const agentMeta = agentId ? agentSelectors.getAgentMetaById(agentId)(agentStoreState) : undefined;
+  const agentItem = agentId ? agentByIdSelectors.getAgentById(agentId)(agentStoreState) : undefined;
+  const facts = await gatherContextFacts(
+    {
+      agent: {
+        // The current-agent chat config carries the skill activation mode the
+        // management rule reads, even when `agentId` is a transient target.
+        chatConfig:
+          agentConfig?.chatConfig ?? agentChatConfigSelectors.currentChatConfig(agentStoreState),
+        description: agentMeta?.description,
+        slug: agentItem?.slug,
+        title: agentMeta?.title,
+      },
+      agentId,
+      disabledPluginIds,
+      // The Profile panel edits `activeAgentId` / `activeGroupId`, not the
+      // builder agent that is answering.
+      editingAgentId: tools?.includes(AgentBuilderIdentifier)
+        ? chatStoreState.activeAgentId || agentId
         : undefined,
+      editingGroupId: chatStoreState.activeGroupId || undefined,
+      enabledToolIds: tools ?? [],
+      features: resolveBrowserConnectorFeatures(),
+      mentionedAgents: initialContext?.mentionedAgents,
+      messages,
+      shareVisitor,
+      topicId,
+      workspaceId: getActiveWorkspaceId() ?? undefined,
+    },
+    createBrowserContextFactProviders({ agentId, groupId, shareVisitor }),
+  );
 
-    // Variable generators
-    variableGenerators: VARIABLE_GENERATORS,
+  // Resolve enabled skills (await: pinned DB skills fetch their content on demand).
+  // In auto mode: expose all installed skills so the AI can discover and activate them.
+  // In manual mode: only expose user-selected skills (filtered by pluginIds).
+  let enabledSkills: OperationSkillSet['skills'] | undefined;
+  if (plugins) {
+    // Manual mode narrows the pool itself, so an unselected skill is neither
+    // listed nor resolvable by `activateSkill`.
+    enabledSkills = (
+      await resolveClientSkills(
+        plugins,
+        disabledPluginIds,
+        agentChatConfigSelectors.skillActivateMode(agentStoreState),
+      )
+    ).skills;
+  }
 
-    // Extended contexts - only pass when enabled
-    ...(isAgentBuilderEnabled && { agentBuilderContext }),
-    ...(isGroupAgentBuilderEnabled && { groupAgentBuilderContext }),
-    ...(agentGroup && { agentGroup }),
-    ...(gtdConfig && { gtd: gtdConfig }),
-  });
+  // One timezone for every date the prompt renders — the core's temporal
+  // placeholders (including `session_date`) and the system-date line — so a
+  // run near midnight cannot carry two different dates.
+  const userTimezone = userGeneralSettingsSelectors.currentTimezone(useUserStore.getState());
+
+  // Everything gathered above is host-specific; shaping it into engine
+  // parameters is shared with the server through `@lobechat/mecha`.
+  const snapshot: ContextSnapshot = {
+    agent: {
+      documents: facts.agentDocuments,
+      enableHistoryCount,
+      historyCount,
+      // The agent's identity lives on the agent row (name/title), not in the
+      // prompt text — inject it so the model can answer "who are you?" with
+      // the name the user gave it instead of the product/model name.
+      identity: { name: agentMeta?.name, title: agentMeta?.title },
+      inputTemplate,
+      knowledge: { fileContents, knowledgeBases },
+      systemRole,
+    },
+    // Desktop local/static URLs are not fetchable by remote providers or cloud tools.
+    fileContext: { enabled: true, includeFileUrl: !isDesktop },
+    model: {
+      capabilities: { isCanUseAudio, isCanUseFC, isCanUseVideo, isCanUseVision },
+      displayName: getRuntimeModelDisplayName(model, provider),
+      knowledgeCutoff: getRuntimeModelKnowledgeCutoff(model, provider),
+      model,
+      provider,
+    },
+    run: {
+      additionalContexts,
+      // MessagesEngine force-disables skills / agent-document injectors when this
+      // is `false` (chat mode). ChatService resolves it from stored user intent
+      // plus the selected model's function-call ability.
+      enableAgentMode: effectiveEnableAgentMode,
+      formatHistorySummary: historySummaryPrompt,
+      historySummary,
+      initialContext,
+      messages,
+      stepContext,
+    },
+    step: facts.step,
+    tools: {
+      enabledSkills,
+      enabledToolIds: tools,
+      manifests,
+      // Selected skills/tools from user for this request
+      selectedSkills: initialContext?.selectedSkills,
+      selectedTools: initialContext?.selectedTools,
+      toolDiscoveryConfig,
+    },
+    // Placeholders resolved by the shared rules (credentials, connectors,
+    // sandbox files, agent / topic identity) plus the browser's own lazy
+    // store-backed generators. Temporal placeholders are not among them: the
+    // core renders those in the user's timezone, the same way on every host.
+    variables: {
+      ...facts.variables,
+      ...HOST_VARIABLE_GENERATORS,
+      // NOTICE(@nekomeowww): required by builtin-tool-memory/src/systemRole.ts —
+      // the browser knows the effective effort (agent override, else the user
+      // setting), which the agent row alone cannot tell.
+      memory_effort: () => (userMemoryConfig ? (memoryContext?.effort ?? '') : ''),
+    },
+    world: {
+      group: agentGroup,
+      userMemory: userMemoryConfig,
+      userTimezone,
+    },
+  };
 
   log('Input messages count: %d', messages.length);
 
-  const result = await engine.process();
+  const { messages: processed } = await runContextEngineering(snapshot);
 
-  log('Output messages count: %d', result.messages.length);
+  log('Output messages count: %d', processed.length);
 
-  if (messages.length > 0 && result.messages.length === 0) {
+  if (messages.length > 0 && processed.length === 0) {
     log(
       'WARNING: Messages were reduced to 0! Input messages: %o',
       messages.map((m) => ({ id: m.id, role: m.role })),
     );
   }
 
-  return result.messages;
+  return processed;
 };

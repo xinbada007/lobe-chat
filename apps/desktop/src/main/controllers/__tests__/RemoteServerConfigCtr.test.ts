@@ -1,26 +1,24 @@
-import { DataSyncConfig } from '@lobechat/electron-client-ipc';
+import type { DataSyncConfig } from '@lobechat/electron-client-ipc';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { App } from '@/core/App';
 
 import RemoteServerConfigCtr from '../RemoteServerConfigCtr';
 
-const { ipcMainHandleMock } = vi.hoisted(() => ({
+const { ipcMainHandleMock, mockFetch } = vi.hoisted(() => ({
   ipcMainHandleMock: vi.fn(),
+  mockFetch: vi.fn(),
 }));
 
-// Mock logger
-vi.mock('@/utils/logger', () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-  }),
+vi.mock('@/utils/net-fetch', () => ({
+  netFetch: mockFetch,
 }));
 
 // Mock electron
 vi.mock('electron', () => ({
+  app: {
+    getVersion: vi.fn(() => '1.2.3'),
+  },
   ipcMain: {
     handle: ipcMainHandleMock,
   },
@@ -47,8 +45,14 @@ const mockBrowserManager = {
   broadcastToAllWindows: vi.fn(),
 };
 
+const mockGatewayConnectionSrv = {
+  disconnect: vi.fn().mockResolvedValue({ success: true }),
+};
+
 const mockApp = {
   browserManager: mockBrowserManager,
+  getController: vi.fn(),
+  getService: vi.fn().mockReturnValue(mockGatewayConnectionSrv),
   storeManager: mockStoreManager,
 } as unknown as App;
 
@@ -167,6 +171,30 @@ describe('RemoteServerConfigCtr', () => {
           refreshToken: 'refresh-token',
         }),
       );
+    });
+  });
+
+  describe('getDesktopBootstrapIdentity', () => {
+    const createAccessToken = (sub: string) =>
+      ['header', Buffer.from(JSON.stringify({ sub })).toString('base64url'), 'signature'].join('.');
+
+    it('returns the OIDC subject without requesting full user state', async () => {
+      await controller.saveTokens(createAccessToken('user-bootstrap'), 'refresh-token');
+
+      expect(controller.getDesktopBootstrapIdentity()).toEqual({
+        isIdentityResolved: true,
+        userId: 'user-bootstrap',
+      });
+    });
+
+    it('resolves to signed-out when no encrypted token exists', () => {
+      expect(controller.getDesktopBootstrapIdentity()).toEqual({ isIdentityResolved: true });
+    });
+
+    it('keeps the cache scope untrusted when the stored token cannot identify a subject', async () => {
+      await controller.saveTokens('not-a-jwt', 'refresh-token');
+
+      expect(controller.getDesktopBootstrapIdentity()).toEqual({ isIdentityResolved: false });
     });
   });
 
@@ -294,6 +322,13 @@ describe('RemoteServerConfigCtr', () => {
       const accessToken = await controller.getAccessToken();
       expect(accessToken).toBeNull();
     });
+
+    it('should disconnect gateway when tokens are cleared', async () => {
+      await controller.saveTokens('access', 'refresh', 3600);
+      await controller.clearTokens();
+
+      expect(mockGatewayConnectionSrv.disconnect).toHaveBeenCalled();
+    });
   });
 
   describe('getTokenExpiresAt', () => {
@@ -335,10 +370,10 @@ describe('RemoteServerConfigCtr', () => {
       const { safeStorage } = await import('electron');
       vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
 
-      // Token expires in 1 hour
-      await controller.saveTokens('access', 'refresh', 3600);
+      // Token expires in 2 days (well beyond the 24-hour default buffer)
+      await controller.saveTokens('access', 'refresh', 2 * 24 * 3600);
 
-      // Default buffer is 5 minutes
+      // Default buffer is 24 hours
       const result = controller.isTokenExpiringSoon();
 
       expect(result).toBe(false);
@@ -407,13 +442,6 @@ describe('RemoteServerConfigCtr', () => {
   });
 
   describe('refreshAccessToken', () => {
-    let mockFetch: ReturnType<typeof vi.fn>;
-
-    beforeEach(() => {
-      mockFetch = vi.fn();
-      global.fetch = mockFetch;
-    });
-
     it('should return error when remote server is not active', async () => {
       mockStoreManager.get.mockImplementation((key) => {
         if (key === 'dataSyncConfig') {
@@ -488,12 +516,19 @@ describe('RemoteServerConfigCtr', () => {
         'https://server.com/oidc/token',
         expect.objectContaining({
           body: expect.stringContaining('grant_type=refresh_token'),
+          headers: expect.objectContaining({
+            'User-Agent': 'LobeHub Desktop/1.2.3',
+          }),
           method: 'POST',
         }),
       );
     });
 
-    it('should handle refresh failure', async () => {
+    it.each([
+      { error: 'invalid_grant' },
+      { error: 'invalid_grant', error_description: 'grant request is invalid' },
+      { error: 'invalid_client', error_description: 'client authentication failed' },
+    ])('should classify refresh failure as non-retryable: %j', async (errorData) => {
       const { safeStorage } = await import('electron');
       vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
       vi.mocked(safeStorage.decryptString).mockImplementation((buffer: Buffer) =>
@@ -514,7 +549,7 @@ describe('RemoteServerConfigCtr', () => {
       await controller.saveTokens('old-access', 'old-refresh');
 
       mockFetch.mockResolvedValue({
-        json: () => Promise.resolve({ error: 'invalid_grant' }),
+        json: () => Promise.resolve(errorData),
         ok: false,
         status: 400,
         statusText: 'Bad Request',
@@ -524,6 +559,12 @@ describe('RemoteServerConfigCtr', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Token refresh failed');
+      expect(result.error).toContain(errorData.error);
+      if (errorData.error_description) {
+        expect(result.error).toContain(errorData.error_description);
+      }
+      expect(controller.isNonRetryableError(result.error)).toBe(true);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
     it('should handle missing tokens in response', async () => {
@@ -607,7 +648,7 @@ describe('RemoteServerConfigCtr', () => {
       expect(mockFetch).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle network errors with retry', async () => {
+    it('should not retry after a network error', async () => {
       const { safeStorage } = await import('electron');
       vi.mocked(safeStorage.isEncryptionAvailable).mockReturnValue(true);
       vi.mocked(safeStorage.decryptString).mockImplementation((buffer: Buffer) =>
@@ -633,9 +674,9 @@ describe('RemoteServerConfigCtr', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Network error');
-      // With retry mechanism, fetch should be called 4 times (1 initial + 3 retries)
-      expect(mockFetch).toHaveBeenCalledTimes(4);
-    }, 15000);
+      expect(controller.isNonRetryableError(result.error)).toBe(false);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('afterAppReady', () => {
@@ -656,6 +697,56 @@ describe('RemoteServerConfigCtr', () => {
 
       // Verify tokens were loaded by checking getTokenExpiresAt
       expect(newController.getTokenExpiresAt()).toBeDefined();
+    });
+
+    it('should load lastRefreshAt from store', () => {
+      const lastRefreshTime = Date.now() - 3600000; // 1 hour ago
+      mockStoreManager.get.mockImplementation((key) => {
+        if (key === 'encryptedTokens') {
+          return {
+            accessToken: 'stored-access',
+            expiresAt: Date.now() + 3600000,
+            lastRefreshAt: lastRefreshTime,
+            refreshToken: 'stored-refresh',
+          };
+        }
+        return { active: false, storageMode: 'cloud' };
+      });
+
+      const newController = new RemoteServerConfigCtr(mockApp);
+      newController.afterAppReady();
+
+      // Verify lastRefreshAt was loaded
+      expect(newController.getLastTokenRefreshAt()).toBe(lastRefreshTime);
+    });
+  });
+
+  describe('getLastTokenRefreshAt', () => {
+    it('should return undefined when no tokens have been saved', () => {
+      expect(controller.getLastTokenRefreshAt()).toBeUndefined();
+    });
+
+    it('should return the last refresh time after saving tokens', async () => {
+      const beforeSave = Date.now();
+      await controller.saveTokens('access', 'refresh', 3600);
+      const afterSave = Date.now();
+
+      const lastRefreshAt = controller.getLastTokenRefreshAt();
+
+      expect(lastRefreshAt).toBeDefined();
+      expect(lastRefreshAt).toBeGreaterThanOrEqual(beforeSave);
+      expect(lastRefreshAt).toBeLessThanOrEqual(afterSave);
+    });
+
+    it('should persist lastRefreshAt to store when saving tokens', async () => {
+      await controller.saveTokens('access', 'refresh', 3600);
+
+      expect(mockStoreManager.set).toHaveBeenCalledWith(
+        'encryptedTokens',
+        expect.objectContaining({
+          lastRefreshAt: expect.any(Number),
+        }),
+      );
     });
   });
 
@@ -693,6 +784,105 @@ describe('RemoteServerConfigCtr', () => {
       const result = await controller.getRemoteServerUrl(customConfig);
 
       expect(result).toBe('https://custom-server.com');
+    });
+  });
+
+  describe('isRemoteServerConfigured', () => {
+    it('should return false when active is undefined', async () => {
+      mockStoreManager.get.mockReturnValue({
+        storageMode: 'cloud',
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(false);
+    });
+
+    it('should return true for active cloud mode (no remoteServerUrl needed)', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: true,
+        storageMode: 'cloud',
+        // remoteServerUrl is undefined for cloud mode
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(true);
+    });
+
+    it('should return true for active selfHost mode with remoteServerUrl', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: true,
+        remoteServerUrl: 'https://my-server.com',
+        storageMode: 'selfHost',
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(true);
+    });
+
+    it('should return false for inactive config', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: false,
+        storageMode: 'cloud',
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false for selfHost mode without remoteServerUrl', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: true,
+        storageMode: 'selfHost',
+        // remoteServerUrl is undefined
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false for selfHost mode with blank remoteServerUrl', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: true,
+        remoteServerUrl: '   ',
+        storageMode: 'selfHost',
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(false);
+    });
+
+    it('should return false for selfHost mode with invalid remoteServerUrl', async () => {
+      mockStoreManager.get.mockReturnValue({
+        active: true,
+        remoteServerUrl: 'foo',
+        storageMode: 'selfHost',
+      });
+
+      const result = await controller.isRemoteServerConfigured();
+
+      expect(result).toBe(false);
+    });
+
+    it('should use provided config instead of fetching', async () => {
+      // Store has inactive config
+      mockStoreManager.get.mockReturnValue({
+        active: false,
+        storageMode: 'cloud',
+      });
+
+      // But we provide an active config
+      const result = await controller.isRemoteServerConfigured({
+        active: true,
+        storageMode: 'cloud',
+      });
+
+      expect(result).toBe(true);
     });
   });
 });

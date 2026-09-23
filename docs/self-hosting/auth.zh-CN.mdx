@@ -1,8 +1,6 @@
 ---
 title: LobeHub 身份验证服务配置
-description: >-
-  了解如何使用 Better Auth 配置外部身份验证服务，以统一管理用户授权。支持的身份验证服务包括 Auth0、
-  Azure ID 等。
+description: 了解如何使用 Better Auth 配置外部身份验证服务，以统一管理用户授权。支持的身份验证服务包括 Auth0、 Azure ID 等。
 tags:
   - 身份验证服务
   - Better Auth
@@ -30,11 +28,12 @@ LobeHub 支持使用 Better Auth 配置外部身份验证服务，供企业 / �
 
 要在 LobeHub 中启用 Better Auth，请设置以下环境变量：
 
-| 环境变量                   | 类型 | 描述                                                                                                              |
-| ---------------------- | -- | --------------------------------------------------------------------------------------------------------------- |
-| `AUTH_SECRET`          | 必选 | 用于加密会话令牌的密钥。使用以下命令生成：`openssl rand -base64 32`                                                                  |
-| `NEXT_PUBLIC_AUTH_URL` | 必选 | 浏览器可访问的 Better Auth 基础 URL（例如 `http://localhost:3010`、`https://LobeHub.com`）。Vercel 部署时可选（会自动从 `VERCEL_URL` 获取） |
-| `AUTH_SSO_PROVIDERS`   | 可选 | 启用的 SSO 提供商列表，以逗号分隔，例如 `google,github,microsoft`                                                                |
+| 环境变量                   | 类型  | 描述                                                                                                                                                                                |
+| ---------------------- | --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_SECRET`          | 必选  | 用于加密会话令牌的密钥。使用以下命令生成：`openssl rand -base64 32`                                                                                                                                    |
+| `APP_URL`              | 必选  | 本实例的公网访问地址（例如 `https://lobe.example.com`）。Better Auth 将其作为 `baseURL` 生成 OAuth 回调与 trusted origins。Vercel 上未设置时可回退到 `VERCEL_*`；其他环境若省略会默认 `http://localhost:<PORT>`，导致公网域名 SSO 失败。 |
+| `NEXT_PUBLIC_AUTH_URL` | 已废弃 | 已移除的 NextAuth / 浏览器认证 URL。设置该变量会导致部署失败，请改用 `APP_URL`。                                                                                                                             |
+| `AUTH_SSO_PROVIDERS`   | 可选  | 启用的 SSO 提供商列表，以逗号分隔，例如 `google,github,microsoft`                                                                                                                                  |
 
 ## 支持的 SSO 提供商
 
@@ -105,9 +104,83 @@ LobeHub 支持使用 Better Auth 配置外部身份验证服务，供企业 / �
 - **开发环境**：`http://localhost:3210/api/auth/callback/{provider}`
 - **生产环境**：`https://yourdomain.com/api/auth/callback/{provider}`
 
+## 追加可信来源
+
+Better Auth 会校验回调和重定向 URL 的来源。如果需要允许另一个精确来源，同时保留自动生成的应用、Vercel、移动端及认证提供商来源，请配置：
+
+```bash
+AUTH_ADDITIONAL_TRUSTED_ORIGINS=https://gateway.example.com
+```
+
+多个来源使用逗号分隔。HTTP 或 HTTPS 地址只保留来源，因此 `https://gateway.example.com/signin` 会按 `https://gateway.example.com` 处理；移动端自定义协议会被完整保留。
+
+仅在确实需要替换完整生成列表时使用 `AUTH_TRUSTED_ORIGINS`。使用该变量时，必须自行包含所有必需的网页来源和移动端自定义协议。请使用精确来源，不要使用通配符。
+
+## 邮箱密码选项
+
+**禁用邮箱密码登录（仅 SSO 模式）：**
+
+设置 `AUTH_DISABLE_EMAIL_PASSWORD=1` 可在登录页面隐藏邮箱输入框，并将注册页面重定向至登录页面。用户只能通过已配置的 SSO 提供商登录。启用前请确保至少配置了一个 SSO 提供商。
+
+**限制注册邮箱或域名：**
+
+设置 `AUTH_ALLOWED_EMAILS`，以逗号分隔多个值：
+
+```bash
+# 仅允许 @example.com 邮箱
+AUTH_ALLOWED_EMAILS=example.com
+
+# 允许多个域名和特定邮箱
+AUTH_ALLOWED_EMAILS=example.com,company.org,admin@other.com
+```
+
+<Callout type={'info'}>
+  `AUTH_ALLOWED_EMAILS` 仅限制哪些邮箱可以注册，不会验证邮箱所有权。结合 `AUTH_EMAIL_VERIFICATION=1`
+  可确保用户确实拥有其注册邮箱。
+</Callout>
+
+## OAuth 快速配置示例
+
+**Google OAuth：**
+
+1. 在 [Google Cloud Console](https://console.cloud.google.com/apis/credentials) 创建 OAuth 凭据
+2. 设置授权重定向 URI：`https://yourdomain.com/api/auth/callback/google`
+3. 配置环境变量：
+
+```bash
+AUTH_SSO_PROVIDERS=google
+AUTH_GOOGLE_ID=xxxxx.apps.googleusercontent.com
+AUTH_GOOGLE_SECRET=GOCSPX-xxxxxxxxxxxxxxxxxxxx
+```
+
+**GitHub OAuth：**
+
+1. 在 [GitHub 开发者设置](https://github.com/settings/developers) 创建 OAuth App
+2. 设置回调 URL：`https://yourdomain.com/api/auth/callback/github`
+3. 配置环境变量：
+
+```bash
+AUTH_SSO_PROVIDERS=github
+AUTH_GITHUB_ID=Ov23xxxxxxxxxxxxx
+AUTH_GITHUB_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
 ## 邮件服务配置
 
-邮件服务用于邮箱验证、密码重置和魔法链接发送。详细配置请参阅 [邮件服务配置](/zh/docs/self-hosting/auth/email)。
+邮件服务用于邮箱验证、密码重置和魔法链接发送。
+
+**SMTP 配置：**
+
+```bash
+SMTP_HOST=smtp.gmail.com        # SMTP 服务器地址
+SMTP_PORT=587                   # TLS 使用 587（推荐），SSL 使用 465
+SMTP_SECURE=false               # port 465 时设为 true，port 587 时设为 false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-specific-password  # Gmail 需使用应用专用密码
+SMTP_FROM=noreply@yourdomain.com      # 可选，默认为 SMTP_USER
+```
+
+详细配置请参阅 [邮件服务配置](/zh/docs/self-hosting/auth/email)。
 
 <Callout type={'tip'}>
   前往 [环境变量](/zh/docs/self-hosting/environment-variables/auth#better-auth) 可查阅所有 Better Auth 相关变量详情。

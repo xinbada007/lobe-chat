@@ -1,7 +1,9 @@
 // @vitest-environment node
-import { Mock, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ChatCompletionTool } from '../../types/chat';
+import type { ChatCompletionTool } from '../../types/chat';
+import type { ModelRuntimeDiagnostics } from '../../types/providerDiagnostics';
 import * as debugStreamModule from '../../utils/debugStream';
 import { LobeCloudflareAI } from './index';
 
@@ -76,6 +78,27 @@ describe('LobeCloudflareAI', () => {
 
       // Assert
       expect(result).toBeInstanceOf(Response);
+    });
+
+    it('captures the bounded raw provider response when diagnostics are enabled', async () => {
+      const diagnostics: ModelRuntimeDiagnostics = {};
+      const result = await instance.chat(
+        {
+          messages: [{ content: 'Hello', role: 'user' }],
+          model: '@hf/meta-llama/meta-llama-3-8b-instruct',
+        },
+        { diagnostics },
+      );
+      await result.text();
+
+      expect(diagnostics.providerResponse).toMatchObject({
+        apiMode: 'cloudflare_workers_ai',
+        rawResponse: {
+          body: 'data: {"response": "Hello, world!"}\n\n',
+          status: 'captured',
+        },
+        status: 200,
+      });
     });
 
     it('should handle text messages correctly', async () => {
@@ -180,7 +203,7 @@ describe('LobeCloudflareAI', () => {
       expect(result).toBeInstanceOf(Response);
     });
 
-    it('should call Cloudflare API with supported opions', async () => {
+    it('should call Cloudflare API with supported options', async () => {
       // Arrange
       const mockResponse = new Response(
         new ReadableStream<Uint8Array>({
@@ -326,9 +349,38 @@ describe('LobeCloudflareAI', () => {
             endpoint: expect.stringMatching(/https:\/\/.+/),
             error: apiError,
             errorType: bizErrorType,
+            message: 'invalid x-api-key',
             provider,
           });
         }
+      });
+
+      it('should surface upstream 400 body as ProviderBizError with message', async () => {
+        // Arrange: fetch resolves with a real 400 Response whose body carries the upstream error detail.
+        const upstreamBody = {
+          error: { message: 'model input exceeds limit', type: 'invalid_request_error' },
+        };
+        (globalThis.fetch as Mock).mockResolvedValue(
+          new Response(JSON.stringify(upstreamBody), {
+            headers: { 'Content-Type': 'application/json' },
+            status: 400,
+          }),
+        );
+
+        // Act & Assert
+        await expect(
+          instance.chat({
+            messages: [{ content: 'Hello', role: 'user' }],
+            model: '@hf/meta-llama/meta-llama-3-8b-instruct',
+            temperature: 0,
+          }),
+        ).rejects.toEqual({
+          endpoint: expect.stringMatching(/https:\/\/.+/),
+          error: upstreamBody,
+          errorType: bizErrorType,
+          message: 'model input exceeds limit',
+          provider,
+        });
       });
 
       it('should throw InvalidProviderAPIKey if no accountID is provided', async () => {
@@ -378,6 +430,7 @@ describe('LobeCloudflareAI', () => {
           endpoint: expect.stringMatching(/https:\/\/.+/),
           error: apiError,
           errorType: bizErrorType,
+          message: 'HTTP 400',
           provider,
         });
       });
@@ -402,6 +455,7 @@ describe('LobeCloudflareAI', () => {
           endpoint: expect.not.stringContaining(accountID),
           error: apiError,
           errorType: bizErrorType,
+          message: 'HTTP 400',
           provider,
         });
       });
@@ -525,6 +579,33 @@ describe('LobeCloudflareAI', () => {
       );
 
       expect(result).toHaveLength(2);
+    });
+
+    it('should throw regular Error when API returns null result', async () => {
+      const instance = new LobeCloudflareAI({
+        apiKey: 'test_api_key',
+        baseURLOrAccountID: accountID,
+      });
+
+      vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            errors: [{ code: 10000, message: 'Authentication error' }],
+            result: null,
+            success: false,
+          }),
+          { status: 401 },
+        ),
+      );
+
+      await expect(instance.models()).rejects.toMatchObject({
+        cause: {
+          errors: [{ code: 10000, message: 'Authentication error' }],
+          result: null,
+          success: false,
+        },
+        message: 'Cloudflare models API returned an invalid response',
+      });
     });
   });
 });

@@ -5,7 +5,7 @@ import { WebBrowsingApiName } from '@lobechat/builtin-tool-web-browsing';
 import { SEARCH_SEARXNG_NOT_CONFIG } from '@lobechat/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { BuiltinToolContext } from '../../types';
+import { type BuiltinToolContext } from '../../types';
 import { webBrowsing } from '../lobe-web-browsing';
 
 // Mock searchService
@@ -117,7 +117,47 @@ describe('WebBrowsingExecutor', () => {
       expect(result.error?.message).toBe('Search failed');
     });
 
-    it('should handle runtime error that returns success false', async () => {
+    it('should return error when response has errorDetail', async () => {
+      mockSearch.mockResolvedValue({
+        costTime: 0,
+        errorDetail: 'Failed to search: 500 Internal Server Error',
+        query: 'test query',
+        resultNumbers: 0,
+        results: [],
+      });
+
+      const result = await webBrowsing.invoke(
+        WebBrowsingApiName.search,
+        { query: 'test query' },
+        createContext(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.type).toBe('PluginServerError');
+      expect(result.error?.message).toBe('Failed to search: 500 Internal Server Error');
+    });
+
+    it('should handle SearXNG not configured via errorDetail', async () => {
+      mockSearch.mockResolvedValue({
+        costTime: 0,
+        errorDetail: SEARCH_SEARXNG_NOT_CONFIG,
+        query: 'test query',
+        resultNumbers: 0,
+        results: [],
+      });
+
+      const result = await webBrowsing.invoke(
+        WebBrowsingApiName.search,
+        { query: 'test query' },
+        createContext(),
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error?.type).toBe('PluginSettingsInvalid');
+      expect(result.error?.body?.provider).toBe('searxng');
+    });
+
+    it('should return runtime error that returns success false', async () => {
       // When runtime catches error, it returns success: false with error message
       mockSearch.mockRejectedValue(new Error('Internal error'));
 
@@ -234,10 +274,24 @@ describe('WebBrowsingExecutor', () => {
     });
 
     it('should handle error items in crawl results', async () => {
+      // crawlPages always nests the per-url outcome under `data` — success and
+      // failure alike (see CrawlUniformResult)
       const mockResponse = {
         results: [
-          { data: { title: 'Page 1', content: 'Content 1', url: 'https://example1.com' } },
-          { errorMessage: 'Failed to crawl' },
+          {
+            crawler: 'naive',
+            data: { title: 'Page 1', content: 'Content 1', url: 'https://example1.com' },
+            originalUrl: 'https://example1.com',
+          },
+          {
+            crawler: 'naive',
+            data: {
+              content: 'Fail to crawl the page.',
+              errorMessage: 'Failed to crawl',
+              errorType: 'NetworkConnectionError',
+            },
+            originalUrl: 'https://invalid.com',
+          },
         ],
       };
       mockCrawlPages.mockResolvedValue(mockResponse);
@@ -249,7 +303,12 @@ describe('WebBrowsingExecutor', () => {
       );
 
       expect(result.success).toBe(true);
-      expect(result.content).toBeDefined();
+      // the failing url has to survive into the model-facing XML, otherwise the
+      // model cannot tell which of the crawled pages to give up on
+      expect(result.content).toContain('<page url="https://example1.com"');
+      expect(result.content).toContain(
+        '<error errorType="NetworkConnectionError" errorMessage="Failed to crawl" url="https://invalid.com">',
+      );
     });
   });
 

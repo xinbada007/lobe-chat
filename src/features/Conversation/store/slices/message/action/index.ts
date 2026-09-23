@@ -1,19 +1,29 @@
+import { shouldDropUnsupportedClaudeAssistantPrefill } from '@lobechat/model-runtime/providers/anthropic/modelId';
+import { toast } from '@lobehub/ui/base-ui';
+import { t } from 'i18next';
 import type { StateCreator } from 'zustand';
 
+import { getEffectiveConversationModel } from '@/features/Conversation/store/utils/effectiveModel';
+
 import type { Store as ConversationStore } from '../../../action';
+import { isSameConversationContext } from '../../../utils/contextGuard';
 import { type MessageCRUDAction, messageCRUDSlice } from './crud';
+import { type MessageReactionAction, messageReactionSlice } from './reaction';
 import { sendMessage } from './sendMessage';
-import { type MessageStateAction, messageStateSlice } from './state';
+import type { MessageStateAction } from './state';
+import { messageStateSlice } from './state';
 
 /**
  * Message Actions
  *
  * Handles all message operations:
  * - CRUD (create, read, update, delete)
+ * - Reaction (add, remove emoji reactions)
  * - State management (loading, collapsed, editing)
  * - Sending messages
  */
-export interface MessageAction extends MessageCRUDAction, MessageStateAction {
+export interface MessageAction
+  extends MessageCRUDAction, MessageReactionAction, MessageStateAction {
   /**
    * Add an AI message (convenience method)
    */
@@ -39,6 +49,9 @@ export const messageSlice: StateCreator<
   // Spread CRUD actions
   ...messageCRUDSlice(set, get, ...rest),
 
+  // Spread reaction actions
+  ...messageReactionSlice(set, get, ...rest),
+
   // Spread state actions
   ...messageStateSlice(set, get, ...rest),
 
@@ -46,20 +59,22 @@ export const messageSlice: StateCreator<
   addAIMessage: async (content: string) => {
     const state = get();
     const { context, hooks } = state;
-    const { agentId, topicId, threadId } = context;
+    const { agentId, groupId, topicId, threadId } = context;
 
     // Get parent message ID
     const displayMessages = state.displayMessages;
     const parentId = displayMessages.length > 0 ? displayMessages.at(-1)?.id : undefined;
 
     const id = await state.createMessage({
-      agentId: agentId,
+      agentId,
+      ...(groupId ? { groupId } : {}),
       content,
       parentId,
       role: 'assistant',
       threadId: threadId ?? undefined,
       topicId: topicId ?? undefined,
     });
+    if (!isSameConversationContext(context, get().context)) return undefined;
 
     if (id) {
       // ===== Hook: onMessageCreated =====
@@ -72,6 +87,16 @@ export const messageSlice: StateCreator<
 
       // Clear input after successful creation
       set({ inputMessage: '' });
+
+      // Claude 4.6+/5 reject conversations ending with an assistant turn
+      // (assistant prefill removed upstream), and the runtime strips trailing
+      // assistant messages for them. Adding mid-conversation stays legal, so
+      // don't block — just tell the user to follow up with a user message.
+      // Effective model = topic override > agent default (see helper JSDoc).
+      const model = getEffectiveConversationModel({ agentId, topicId });
+      if (model && shouldDropUnsupportedClaudeAssistantPrefill(model)) {
+        toast.info(t('input.addAiPrefillUnsupported', { ns: 'chat' }));
+      }
     }
 
     return id;
@@ -80,7 +105,7 @@ export const messageSlice: StateCreator<
   addUserMessage: async ({ message, fileList }) => {
     const state = get();
     const { context, hooks } = state;
-    const { agentId, topicId, threadId } = context;
+    const { agentId, groupId, topicId, threadId } = context;
 
     // Get parent message ID
     const displayMessages = state.displayMessages;
@@ -88,6 +113,7 @@ export const messageSlice: StateCreator<
 
     const id = await state.createMessage({
       agentId,
+      ...(groupId ? { groupId } : {}),
       content: message,
       files: fileList,
       parentId,
@@ -95,6 +121,7 @@ export const messageSlice: StateCreator<
       threadId: threadId ?? undefined,
       topicId: topicId ?? undefined,
     });
+    if (!isSameConversationContext(context, get().context)) return undefined;
 
     if (id) {
       // ===== Hook: onMessageCreated =====

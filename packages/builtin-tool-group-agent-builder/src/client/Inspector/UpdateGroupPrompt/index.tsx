@@ -1,7 +1,8 @@
 'use client';
 
 import type { BuiltinInspectorProps } from '@lobechat/types';
-import { Flexbox, Text } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -52,8 +53,10 @@ export const UpdateGroupPromptInspector = memo<
   // Initial streaming state
   if (isArgumentsStreaming && !prompt) {
     return (
-      <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
-        <span>{t('builtins.lobe-group-agent-builder.apiName.updateGroupPrompt')}</span>
+      <div className={inspectorTextStyles.root}>
+        <span className={shinyTextStyles.shinyText}>
+          {t('builtins.lobe-group-agent-builder.apiName.updateGroupPrompt')}
+        </span>
       </div>
     );
   }
@@ -61,20 +64,20 @@ export const UpdateGroupPromptInspector = memo<
   const streamingLength = prompt?.length ?? 0;
 
   return (
-    <Flexbox
-      align="center"
-      className={cx(styles.root, (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText)}
-      gap={6}
-      horizontal
-    >
-      <span className={styles.label}>
+    <Flexbox horizontal align="center" className={styles.root} gap={6}>
+      <span
+        className={cx(
+          styles.label,
+          (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText,
+        )}
+      >
         {t('builtins.lobe-group-agent-builder.apiName.updateGroupPrompt')}
       </span>
       {/* Show length diff when completed */}
       {!isLoading && !isArgumentsStreaming && lengthDiff !== null && (
         <Text
-          as="span"
           code
+          as="span"
           color={lengthDiff >= 0 ? cssVar.colorSuccess : cssVar.colorError}
           fontSize={12}
         >
@@ -85,7 +88,7 @@ export const UpdateGroupPromptInspector = memo<
       )}
       {/* Show streaming length */}
       {(isArgumentsStreaming || isLoading) && streamingLength > 0 && (
-        <Text as="span" code color={cssVar.colorTextDescription} fontSize={12}>
+        <Text code as="span" color={cssVar.colorTextDescription} fontSize={12}>
           ({streamingLength}
           {t('builtins.lobe-agent-builder.inspector.chars')})
         </Text>

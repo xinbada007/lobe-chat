@@ -12,7 +12,7 @@ describe('AnthropicStream', () => {
         return {
           next: async () => {
             switch (count) {
-              case 0:
+              case 0: {
                 count++;
                 return {
                   done: false,
@@ -21,7 +21,8 @@ describe('AnthropicStream', () => {
                     message: { id: 'message_1', metadata: {} },
                   },
                 };
-              case 1:
+              }
+              case 1: {
                 count++;
                 return {
                   done: false,
@@ -30,7 +31,8 @@ describe('AnthropicStream', () => {
                     delta: { type: 'text_delta', text: 'Hello' },
                   },
                 };
-              case 2:
+              }
+              case 2: {
                 count++;
                 return {
                   done: false,
@@ -39,7 +41,8 @@ describe('AnthropicStream', () => {
                     delta: { type: 'text_delta', text: ' world!' },
                   },
                 };
-              case 3:
+              }
+              case 3: {
                 count++;
                 return {
                   done: false,
@@ -48,8 +51,10 @@ describe('AnthropicStream', () => {
                     delta: { stop_reason: 'stop' },
                   },
                 };
-              default:
+              }
+              default: {
                 return { done: true, value: undefined };
+              }
             }
           },
         };
@@ -59,13 +64,16 @@ describe('AnthropicStream', () => {
     const onStartMock = vi.fn();
     const onTextMock = vi.fn();
     const onCompletionMock = vi.fn();
+    const onFinalMock = vi.fn();
 
     const protocolStream = AnthropicStream(mockAnthropicStream, {
       callbacks: {
         onStart: onStartMock,
         onText: onTextMock,
         onCompletion: onCompletionMock,
+        onFinal: onFinalMock,
       },
+      payload: { apiMode: 'messages', model: 'claude-opus-4-8', provider: 'anthropic' },
     });
 
     const decoder = new TextDecoder();
@@ -95,6 +103,19 @@ describe('AnthropicStream', () => {
     expect(onTextMock).toHaveBeenNthCalledWith(1, 'Hello');
     expect(onTextMock).toHaveBeenNthCalledWith(2, ' world!');
     expect(onCompletionMock).toHaveBeenCalledTimes(1);
+    expect(onFinalMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        usageMissingDiagnostics: {
+          apiMode: 'messages',
+          finishReason: 'stop',
+          hasUsageMetadata: false,
+          model: 'claude-opus-4-8',
+          provider: 'anthropic',
+          source: 'anthropic_messages',
+          terminalEventType: 'message_delta',
+        },
+      }),
+    );
   });
 
   it('should handle tool use event and ReadableStream input', async () => {
@@ -602,7 +623,7 @@ describe('AnthropicStream', () => {
           'data: "end_turn"\n',
           'id: msg_01MNsLe7n1uVLtu6W8rCFujD',
           'event: usage',
-          'data: {"inputCacheMissTokens":46,"totalInputTokens":46,"totalOutputTokens":365,"totalTokens":411}\n',
+          'data: {"inputCacheMissTokens":46,"inputCachedTokens":0,"totalInputTokens":46,"totalOutputTokens":365,"totalTokens":411}\n',
           'id: msg_01MNsLe7n1uVLtu6W8rCFujD',
           'event: stop',
           'data: "message_stop"\n',
@@ -762,7 +783,7 @@ describe('AnthropicStream', () => {
           'data: "end_turn"\n',
           'id: msg_019q32esPvu3TftzZnL6JPys',
           'event: usage',
-          'data: {"inputCacheMissTokens":92,"totalInputTokens":92,"totalOutputTokens":263,"totalTokens":355}\n',
+          'data: {"inputCacheMissTokens":92,"inputCachedTokens":0,"totalInputTokens":92,"totalOutputTokens":263,"totalTokens":355}\n',
           'id: msg_019q32esPvu3TftzZnL6JPys',
           'event: stop',
           'data: "message_stop"\n',

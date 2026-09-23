@@ -1,7 +1,8 @@
 'use client';
 
 import { type UIChatMessage } from '@lobechat/types';
-import { Block, Flexbox, GroupAvatar, Icon, Tag } from '@lobehub/ui';
+import { Block, Flexbox, GroupAvatar, Icon } from '@lobehub/ui';
+import { Tag } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import isEqual from 'fast-deep-equal';
 import { ListTodo } from 'lucide-react';
@@ -19,7 +20,6 @@ import TaskItem from './TaskItem';
 
 interface GroupTasksMessageProps {
   id: string;
-  index: number;
 }
 
 /**
@@ -32,26 +32,26 @@ const GroupTasksAvatar = memo<{ avatars: { avatar?: string; background?: string 
       <Flexbox flex={'none'} height={28} style={{ position: 'relative' }} width={28}>
         <GroupAvatar
           avatarShape={'square'}
+          cornerShape={'square'}
+          size={28}
           avatars={avatars.map((a) => ({
             avatar: a.avatar || DEFAULT_AVATAR,
             background: a.background,
           }))}
-          cornerShape={'square'}
-          size={28}
         />
         <Block
           align={'center'}
           flex={'none'}
           height={16}
           justify={'center'}
+          variant={'outlined'}
+          width={16}
           style={{
             borderRadius: 4,
             position: 'absolute',
             right: -4,
             top: -4,
           }}
-          variant={'outlined'}
-          width={16}
         >
           <Icon color={cssVar.colorTextDescription} icon={ListTodo} size={10} />
         </Block>
@@ -62,7 +62,7 @@ const GroupTasksAvatar = memo<{ avatars: { avatar?: string; background?: string 
 
 GroupTasksAvatar.displayName = 'GroupTasksAvatar';
 
-const GroupTasksMessage = memo<GroupTasksMessageProps>(({ id, index }) => {
+const GroupTasksMessage = memo<GroupTasksMessageProps>(({ id }) => {
   const { t } = useTranslation('chat');
   const item = useConversationStore(dataSelectors.getDisplayMessageById(id), isEqual)!;
   const actionsConfig = useConversationStore((s) => s.actionsBar?.assistant);
@@ -91,7 +91,7 @@ const GroupTasksMessage = memo<GroupTasksMessageProps>(({ id, index }) => {
       .filter(Boolean) as { avatar?: string; background?: string; title?: string }[];
   }, isEqual);
 
-  // Build title: "Agent1 / Agent2 等 N 个 agents tasks" (show max 2 agents)
+  // Build title: "Agent1 / Agent2 and N more agents tasks" (show max 2 agents)
   const title = useMemo(() => {
     const agentNames = taskAgents.map((a) => a.title).filter(Boolean);
     if (agentNames.length === 0) return '';
@@ -108,7 +108,7 @@ const GroupTasksMessage = memo<GroupTasksMessageProps>(({ id, index }) => {
       });
     }
 
-    // Show "Agent1 / Agent2 等 X 个 agents tasks" when more than 2
+    // Show "Agent1 / Agent2 and X more agents tasks" when more than 2
     return t('task.groupTasksTitle', {
       agents: displayedAgents,
       count: totalAgents,
@@ -124,16 +124,14 @@ const GroupTasksMessage = memo<GroupTasksMessageProps>(({ id, index }) => {
 
   return (
     <ChatItem
+      showTitle
       aboveMessage={null}
-      actions={
-        <AssistantActionsBar actionsConfig={actionsConfig} data={item} id={id} index={index} />
-      }
+      actions={<AssistantActionsBar actionsConfig={actionsConfig} data={item} id={id} />}
       avatar={{ title }}
       customAvatarRender={() => <GroupTasksAvatar avatars={taskAgents} />}
       id={id}
       message=""
       placement="left"
-      showTitle
       time={createdAt}
       titleAddon={<Tag>{t('task.groupTasks', { count: tasks.length })}</Tag>}
     >

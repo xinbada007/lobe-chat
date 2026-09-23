@@ -1,20 +1,17 @@
 import { FORM_STYLE } from '@lobechat/const';
 import { exportFile } from '@lobechat/utils/client';
-import { Button, Form, type FormItemProps, copyToClipboard } from '@lobehub/ui';
-import { Flexbox } from '@lobehub/ui';
-import { App, Switch } from 'antd';
-import isEqual from 'fast-deep-equal';
+import { type FormItemProps } from '@lobehub/ui';
+import { copyToClipboard, Flexbox, Form } from '@lobehub/ui';
+import { Button, Switch, toast } from '@lobehub/ui/base-ui';
 import { CopyIcon } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { useAgentStore } from '@/store/agent';
-import { agentSelectors } from '@/store/agent/selectors';
-import { useChatStore } from '@/store/chat';
-import { displayMessageSelectors, topicSelectors } from '@/store/chat/selectors';
 
+import { useShareData } from '../ShareDataProvider';
 import { styles } from '../style';
+import { useExportMessages } from '../useExportMessages';
 import Preview from './Preview';
 import { generateMarkdown } from './template';
 import { type FieldType } from './type';
@@ -29,7 +26,7 @@ const DEFAULT_FIELD_VALUE: FieldType = {
 const ShareText = memo(() => {
   const [fieldValue, setFieldValue] = useState(DEFAULT_FIELD_VALUE);
   const { t } = useTranslation(['chat', 'common']);
-  const { message } = App.useApp();
+
   const settings: FormItemProps[] = [
     {
       children: <Switch />,
@@ -65,15 +62,18 @@ const ShareText = memo(() => {
     },
   ];
 
-  const [systemRole] = useAgentStore((s) => [agentSelectors.currentAgentSystemRole(s)]);
-  const messages = useChatStore(displayMessageSelectors.activeDisplayMessages, isEqual);
-  const topic = useChatStore(topicSelectors.currentActiveTopic, isEqual);
-
-  const title = topic?.title || t('shareModal.exportTitle');
+  const { displayMessages, systemRole, title } = useShareData();
+  // Markdown serializes each tool's `content` too, so the same omitted rows
+  // would export as empty code blocks — see `useExportMessages`.
+  const {
+    isHydrating,
+    isIncomplete,
+    messages: exportMessages,
+  } = useExportMessages(displayMessages);
   const content = generateMarkdown({
     ...fieldValue,
-    messages,
-    systemRole,
+    messages: exportMessages,
+    systemRole: systemRole ?? '',
     title,
   }).replaceAll('\n\n\n', '\n');
 
@@ -83,22 +83,25 @@ const ShareText = memo(() => {
     <>
       <Button
         block
+        disabled={isHydrating || isIncomplete}
         icon={CopyIcon}
-        onClick={async () => {
-          await copyToClipboard(content);
-          message.success(t('copySuccess', { ns: 'common' }));
-        }}
+        loading={isHydrating}
         size={isMobile ? undefined : 'large'}
         type={'primary'}
+        onClick={async () => {
+          await copyToClipboard(content);
+          toast.success(t('copySuccess', { ns: 'common' }));
+        }}
       >
         {t('copy', { ns: 'common' })}
       </Button>
       <Button
         block
+        disabled={isHydrating || isIncomplete}
+        size={isMobile ? undefined : 'large'}
         onClick={() => {
           exportFile(content, `${title}.md`);
         }}
-        size={isMobile ? undefined : 'large'}
       >
         {t('shareModal.downloadFile')}
       </Button>
@@ -121,7 +124,7 @@ const ShareText = memo(() => {
         </Flexbox>
       </Flexbox>
       {isMobile && (
-        <Flexbox className={styles.footer} gap={8} horizontal>
+        <Flexbox horizontal className={styles.footer} gap={8}>
           {button}
         </Flexbox>
       )}

@@ -1,7 +1,8 @@
 'use client';
 
 import { ThreadStatus } from '@lobechat/types';
-import { Avatar, Block, Flexbox, Icon, Text } from '@lobehub/ui';
+import { Block, Flexbox, Icon } from '@lobehub/ui';
+import { Avatar, Text } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { Footprints, ListChecksIcon, Wrench, XIcon } from 'lucide-react';
 import { memo, useEffect, useState } from 'react';
@@ -57,17 +58,17 @@ const TaskStatusIndicator = memo<{ status?: ThreadStatus }>(({ status }) => {
 
   return (
     <Block
+      horizontal
       align={'center'}
       flex={'none'}
       gap={4}
       height={24}
-      horizontal
       justify={'center'}
+      variant={'outlined'}
+      width={24}
       style={{
         fontSize: 12,
       }}
-      variant={'outlined'}
-      width={24}
     >
       {icon}
     </Block>
@@ -117,10 +118,10 @@ const MetricsDisplay = memo<MetricsDisplayProps>(({ metrics, status }) => {
   if (!hasSteps && !hasToolCalls && !hasTime) return null;
 
   return (
-    <Flexbox align="center" gap={8} horizontal>
+    <Flexbox horizontal align="center" gap={8}>
       {/* Steps */}
       {hasSteps && (
-        <Flexbox align="center" gap={2} horizontal>
+        <Flexbox horizontal align="center" gap={2}>
           <Icon color={cssVar.colorTextTertiary} icon={Footprints} size={12} />
           <Text fontSize={12} type="secondary">
             {steps}
@@ -129,7 +130,7 @@ const MetricsDisplay = memo<MetricsDisplayProps>(({ metrics, status }) => {
       )}
       {/* Tool calls */}
       {hasToolCalls && (
-        <Flexbox align="center" gap={2} horizontal>
+        <Flexbox horizontal align="center" gap={2}>
           <Icon color={cssVar.colorTextTertiary} icon={Wrench} size={12} />
           <Text fontSize={12} type="secondary">
             {toolCalls}
@@ -154,7 +155,7 @@ MetricsDisplay.displayName = 'MetricsDisplay';
 
 const TaskTitle = memo<TaskTitleProps>(({ title, status, metrics, agent }) => {
   return (
-    <Flexbox align="center" gap={6} horizontal>
+    <Flexbox horizontal align="center" gap={6}>
       <TaskStatusIndicator status={status} />
       {agent && (
         <Avatar

@@ -1,5 +1,6 @@
 import { type ChatFileItem } from '@lobechat/types';
-import { Flexbox, Text } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 
@@ -31,10 +32,10 @@ const FileItem = memo<ChatFileItem>(({ name, fileType, size, id }) => {
 
   return (
     <Flexbox
+      horizontal
       align={'center'}
       className={styles.container}
       gap={8}
-      horizontal
       onClick={() => {
         openFilePreview({ fileId: id });
       }}

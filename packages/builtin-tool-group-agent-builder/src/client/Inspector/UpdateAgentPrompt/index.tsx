@@ -1,7 +1,8 @@
 'use client';
 
 import type { BuiltinInspectorProps } from '@lobechat/types';
-import { Avatar, Flexbox, Text } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { Avatar, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -32,6 +33,8 @@ const styles = createStaticStyles(({ css, cssVar: cv }) => ({
     display: flex;
     gap: 6px;
     align-items: center;
+
+    min-width: 0;
   `,
 }));
 
@@ -45,7 +48,7 @@ export const UpdateAgentPromptInspector = memo<
 
   // Get agent info from the current group
   const agent = useAgentGroupStore((s) => {
-    const agents = agentGroupSelectors.currentGroupAgents(s);
+    const agents = s.activeGroupId ? agentGroupSelectors.getGroupAgents(s.activeGroupId)(s) : [];
     return agents.find((a) => a.id === agentId);
   });
 
@@ -61,8 +64,10 @@ export const UpdateAgentPromptInspector = memo<
   // Initial streaming state
   if (isArgumentsStreaming && !agentId) {
     return (
-      <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
-        <span>{t('builtins.lobe-group-agent-builder.apiName.updateAgentPrompt')}</span>
+      <div className={inspectorTextStyles.root}>
+        <span className={shinyTextStyles.shinyText}>
+          {t('builtins.lobe-group-agent-builder.apiName.updateAgentPrompt')}
+        </span>
       </div>
     );
   }
@@ -77,25 +82,35 @@ export const UpdateAgentPromptInspector = memo<
     : 'builtins.lobe-group-agent-builder.apiName.updateAgentPrompt';
 
   return (
-    <Flexbox
-      align="center"
-      className={cx(styles.root, (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText)}
-      gap={6}
-      horizontal
-    >
-      <span className={styles.label}>{t(labelKey)}</span>
+    <Flexbox horizontal align="center" className={styles.root} gap={6}>
+      <span
+        className={cx(
+          styles.label,
+          (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText,
+        )}
+      >
+        {t(labelKey)}
+      </span>
       {/* Only show avatar and title for non-supervisor agents */}
       {agent && !isSupervisor && (
         <>
           <Avatar avatar={agent.avatar ?? undefined} size={18} title={agent.title ?? undefined} />
-          <span className={styles.agentName}>{agent.title}</span>
+          <Text
+            className={styles.agentName}
+            ellipsis={{
+              tooltipWhenOverflow: true,
+            }}
+          >
+            {agent.title}
+          </Text>
         </>
       )}
       {/* Show length diff when completed */}
       {!isLoading && !isArgumentsStreaming && lengthDiff !== null && (
         <Text
-          as="span"
           code
+          noWrap
+          as="span"
           color={lengthDiff >= 0 ? cssVar.colorSuccess : cssVar.colorError}
           fontSize={12}
         >
@@ -106,7 +121,7 @@ export const UpdateAgentPromptInspector = memo<
       )}
       {/* Show streaming length */}
       {(isArgumentsStreaming || isLoading) && streamingLength > 0 && (
-        <Text as="span" code color={cssVar.colorTextDescription} fontSize={12}>
+        <Text code as="span" color={cssVar.colorTextDescription} fontSize={12}>
           ({streamingLength}
           {t('builtins.lobe-agent-builder.inspector.chars')})
         </Text>

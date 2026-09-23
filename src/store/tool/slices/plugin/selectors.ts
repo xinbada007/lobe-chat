@@ -1,9 +1,9 @@
-import { type LobeChatPluginManifest } from '@lobehub/chat-plugin-sdk';
-import { uniq } from 'es-toolkit/compat';
+import { type Meta, type ToolManifest } from '@lobechat/types';
 
+import { isInstalledPluginAvailableInCurrentEnv } from '@/helpers/toolAvailability';
 import { type InstallPluginMeta, type LobeToolCustomPlugin } from '@/types/tool/plugin';
 
-import type { ToolStoreState } from '../../initialState';
+import { type ToolStoreState } from '../../initialState';
 
 const installedPlugins = (s: ToolStoreState) => s.installedPlugins;
 
@@ -16,25 +16,51 @@ const getInstalledPluginById = (id?: string) => (s: ToolStoreState) => {
   return installedPlugins(s).find((p) => p.identifier === id);
 };
 
-const getPluginMetaById = (id: string) => (s: ToolStoreState) => {
-  // first try to find meta from store
-  const item = s.oldPluginItems.find((i) => i.identifier === id);
-  if (item)
-    return {
-      avatar: item.avatar,
-      description: item.description,
-      tags: item.tags,
-      title: item.title,
-    };
+/**
+ * Marketplace `PluginManifest` shape (`@lobehub/market-types`): flat
+ * `name` / `description` / `icon` and no `meta` object. The server-side agent
+ * builder install path stores this shape verbatim in `user_installed_plugins`,
+ * so a community MCP row can reach the client without `manifest.meta`.
+ */
+interface MarketShapedManifest {
+  description?: string;
+  icon?: string;
+  meta?: Meta;
+  name?: string;
+  tags?: string[];
+}
 
-  // then use installed meta
-  return getInstalledPluginById(id)(s)?.manifest?.meta;
+/**
+ * Resolve the display meta of an installed plugin manifest.
+ *
+ * Prefers the LobeChat `manifest.meta`; when it is absent, derive it from the
+ * marketplace shape so the row still renders its real name instead of a blank
+ * label.
+ */
+export const resolvePluginManifestMeta = (manifest?: ToolManifest | null): Meta | undefined => {
+  if (!manifest) return;
+  if (manifest.meta) return manifest.meta;
+
+  const { description, icon, name, tags } = manifest as MarketShapedManifest;
+  // `Meta.title` is required; without a market `name` there is nothing to
+  // derive and consumers fall back to the identifier.
+  if (!name) return;
+
+  return {
+    avatar: icon,
+    description,
+    tags,
+    title: name,
+  };
+};
+
+const getPluginMetaById = (id: string) => (s: ToolStoreState) => {
+  return resolvePluginManifestMeta(getInstalledPluginById(id)(s)?.manifest);
 };
 
 const getCustomPluginById = (id: string) => (s: ToolStoreState) =>
   installedPlugins(s).find((i) => i.identifier === id && i.type === 'customPlugin') as
-    | LobeToolCustomPlugin
-    | undefined;
+    LobeToolCustomPlugin | undefined;
 
 const getToolManifestById = (id: string) => (s: ToolStoreState) =>
   getInstalledPluginById(id)(s)?.manifest;
@@ -43,19 +69,18 @@ const getPluginSettingsById = (id: string) => (s: ToolStoreState) =>
   getInstalledPluginById(id)(s)?.settings || {};
 
 const storeAndInstallPluginsIdList = (s: ToolStoreState) =>
-  uniq(
-    [s.installedPlugins.map((i) => i.identifier), s.oldPluginItems.map((i) => i.identifier)].flat(),
-  );
+  s.installedPlugins.map((i) => i.identifier);
 
 const installedPluginManifestList = (s: ToolStoreState) =>
   installedPlugins(s)
-    .map((i) => i.manifest as LobeChatPluginManifest)
+    .map((i) => i.manifest as ToolManifest)
     .filter((i) => !!i);
 
 const installedPluginMetaList = (s: ToolStoreState) =>
   installedPlugins(s)
-    // Filter out Klavis plugins (they have their own display location)
-    .filter((p) => !p.customParams?.klavis)
+    // Filter out Composio plugins (they have their own display location)
+    .filter((p) => !p.customParams?.composio)
+    .filter((plugin) => isInstalledPluginAvailableInCurrentEnv(plugin))
     .map<InstallPluginMeta>((p) => ({
       author: p.manifest?.author,
       createdAt: p.manifest?.createdAt || (p.manifest as any)?.createAt,

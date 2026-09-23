@@ -1,7 +1,6 @@
 'use client';
 
 import type { BuiltinInspectorProps } from '@lobechat/types';
-import { cx } from 'antd-style';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -33,11 +32,13 @@ export const GetAvailableModelsInspector = memo<
   // Initial streaming state
   if (isArgumentsStreaming || isLoading) {
     return (
-      <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
-        <span>{t('builtins.lobe-agent-builder.apiName.getAvailableModels')}</span>
+      <div className={inspectorTextStyles.root}>
+        <span className={shinyTextStyles.shinyText}>
+          {t('builtins.lobe-agent-builder.apiName.getAvailableModels')}
+        </span>
         {providerId && (
           <>
-            : <span className={highlightTextStyles.primary}>{providerId}</span>
+            :<span className={highlightTextStyles.primary}>{providerId}</span>
           </>
         )}
       </div>
@@ -47,7 +48,7 @@ export const GetAvailableModelsInspector = memo<
   // Loaded state with results
   return (
     <div className={inspectorTextStyles.root}>
-      <span>{t('builtins.lobe-agent-builder.apiName.getAvailableModels')}: </span>
+      <span>{t('builtins.lobe-agent-builder.apiName.getAvailableModels')}:</span>
       {modelInfo && (
         <span className={highlightTextStyles.primary}>
           {modelInfo.displayModels.join(' / ')}

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestDB } from '../../../core/getTestDB';
 import { messageGroups, messages, topics, users } from '../../../schemas';
-import { LobeChatDatabase } from '../../../type';
+import type { LobeChatDatabase } from '../../../type';
 import { MessageModel } from '../../message';
 
 const userId = 'message-query-perf-test-user';
@@ -41,7 +41,7 @@ afterEach(async () => {
  * Performance tests for MessageModel.query with MessageGroup aggregation
  * These tests run sequentially to avoid resource contention
  */
-describe.sequential('MessageModel.query performance', () => {
+describe('MessageModel.query performance', { concurrent: false }, () => {
   it('should query 500 messages within 100ms', { retry: 3 }, async () => {
     // Create 500 messages
     const messageData = Array.from({ length: 500 }, (_, i) => ({

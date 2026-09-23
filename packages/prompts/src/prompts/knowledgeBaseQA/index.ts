@@ -1,10 +1,10 @@
-import { ChatSemanticSearchChunk, KnowledgeItem } from '@lobechat/types';
+import type { ChatSemanticSearchChunk, KnowledgeItem } from '@lobechat/types';
 
 import { chunkPrompts } from './chunk';
 import { knowledgePrompts } from './knowledge';
 import { userQueryPrompt } from './userQuery';
 
-export type { FileContent } from './formatFileContents';
+export type { FileContent, FileContentRange } from './formatFileContents';
 export { promptFileContents } from './formatFileContents';
 export { promptNoSearchResults } from './formatNoSearchResults';
 export type { FileSearchResult, FileSearchResultChunk } from './formatSearchResults';

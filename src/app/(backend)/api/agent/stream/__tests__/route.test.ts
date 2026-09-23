@@ -10,9 +10,22 @@ const mockStreamEventManager = {
   subscribeStreamEvents: vi.fn(),
 };
 
+const mockAgentStateManager = {
+  getOperationMetadata: vi.fn(),
+};
+
+const mockCreateLambdaContext = vi.fn();
+
 vi.mock('@/server/modules/AgentRuntime', () => ({
-  StreamEventManager: vi.fn(() => mockStreamEventManager),
+  createAgentStateManager: vi.fn(() => mockAgentStateManager),
+  createStreamEventManager: vi.fn(() => mockStreamEventManager),
 }));
+
+vi.mock('@/libs/trpc/lambda/context', () => ({
+  createLambdaContext: (...args: unknown[]) => mockCreateLambdaContext(...args),
+}));
+
+const OWNER_USER_ID = 'test-user';
 
 describe('/api/agent/stream route', () => {
   const MOCK_TIMESTAMP = 1758203237000;
@@ -21,6 +34,11 @@ describe('/api/agent/stream route', () => {
     vi.resetAllMocks();
     // Mock Date.now to return consistent timestamp
     vi.spyOn(Date, 'now').mockReturnValue(MOCK_TIMESTAMP);
+
+    // Default: authenticated as the operation owner, non-share operation.
+    // Individual tests override these to exercise the 401/404 paths.
+    mockCreateLambdaContext.mockResolvedValue({ userId: OWNER_USER_ID });
+    mockAgentStateManager.getOperationMetadata.mockResolvedValue({ userId: OWNER_USER_ID });
   });
 
   afterEach(() => {
@@ -53,6 +71,98 @@ describe('/api/agent/stream route', () => {
         'Cache-Control, Last-Event-ID',
       );
       expect(response.headers.get('X-Accel-Buffering')).toBe('no');
+    });
+  });
+
+  describe('Authorization', () => {
+    it('should return 401 when the caller is not authenticated', async () => {
+      mockCreateLambdaContext.mockResolvedValue({ userId: null });
+
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=test-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(401);
+      const data = await response.json();
+      expect(data.error).toBe('unauthorized');
+      expect(mockAgentStateManager.getOperationMetadata).not.toHaveBeenCalled();
+      expect(mockStreamEventManager.getStreamHistory).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 when the operation does not exist', async () => {
+      mockAgentStateManager.getOperationMetadata.mockResolvedValue(null);
+
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=unknown-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toBe('operation_not_found');
+      expect(mockStreamEventManager.getStreamHistory).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 when the operation belongs to another user', async () => {
+      mockCreateLambdaContext.mockResolvedValue({ userId: 'other-user' });
+      mockAgentStateManager.getOperationMetadata.mockResolvedValue({ userId: OWNER_USER_ID });
+
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=test-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toBe('operation_not_found');
+      expect(mockStreamEventManager.getStreamHistory).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 for a share-visitor operation even when the caller is the visitor', async () => {
+      mockCreateLambdaContext.mockResolvedValue({ userId: 'visitor-user' });
+      mockAgentStateManager.getOperationMetadata.mockResolvedValue({
+        streamOwnerUserId: 'visitor-user',
+        userId: OWNER_USER_ID,
+      });
+
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=share-visitor-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toBe('operation_not_found');
+      expect(mockStreamEventManager.getStreamHistory).not.toHaveBeenCalled();
+    });
+
+    it('should return 404 for a share-visitor operation even when the caller is the creator', async () => {
+      mockCreateLambdaContext.mockResolvedValue({ userId: OWNER_USER_ID });
+      mockAgentStateManager.getOperationMetadata.mockResolvedValue({
+        streamOwnerUserId: 'visitor-user',
+        userId: OWNER_USER_ID,
+      });
+
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=share-visitor-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(404);
+      const data = await response.json();
+      expect(data.error).toBe('operation_not_found');
+      expect(mockStreamEventManager.getStreamHistory).not.toHaveBeenCalled();
+    });
+
+    it('should allow the owner to read their own operation', async () => {
+      const request = new NextRequest(
+        'https://test.com/api/agent/stream?operationId=test-operation',
+      );
+      const response = await GET(request);
+
+      expect(response.status).toBe(200);
+      expect(mockAgentStateManager.getOperationMetadata).toHaveBeenCalledWith('test-operation');
     });
   });
 
@@ -93,7 +203,7 @@ describe('/api/agent/stream route', () => {
             readCount++;
           }
         }
-      } catch (error) {
+      } catch {
         // Timeout or error
       } finally {
         reader.releaseLock();
@@ -164,7 +274,7 @@ describe('/api/agent/stream route', () => {
             readCount++;
           }
         }
-      } catch (error) {
+      } catch {
         // Timeout or error
       } finally {
         reader.releaseLock();
@@ -246,7 +356,7 @@ describe('/api/agent/stream route', () => {
             readCount++;
           }
         }
-      } catch (error) {
+      } catch {
         // Timeout or error
       } finally {
         reader.releaseLock();
@@ -316,7 +426,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
             readCount++;
           }
         }
-      } catch (error) {
+      } catch {
         // Timeout or error
       } finally {
         reader.releaseLock();
@@ -425,7 +535,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
             readCount++;
           }
         }
-      } catch (error) {
+      } catch {
         // Timeout or error
       } finally {
         reader.releaseLock();
@@ -485,7 +595,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
       let capturedCallback: ((events: any[]) => void) | null = null;
 
       mockStreamEventManager.subscribeStreamEvents.mockImplementation(
-        (operationId, lastEventId, callback, signal) => {
+        (operationId, lastEventId, callback, _signal) => {
           capturedCallback = callback;
           return Promise.resolve();
         },
@@ -521,7 +631,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
       let capturedCallback: ((events: any[]) => void) | null = null;
 
       mockStreamEventManager.subscribeStreamEvents.mockImplementation(
-        (operationId, lastEventId, callback, signal) => {
+        (operationId, lastEventId, callback, _signal) => {
           capturedCallback = callback;
           return Promise.resolve();
         },
@@ -557,7 +667,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
       let capturedCallback: ((events: any[]) => void) | null = null;
 
       mockStreamEventManager.subscribeStreamEvents.mockImplementation(
-        (operationId, lastEventId, callback, signal) => {
+        (operationId, lastEventId, callback, _signal) => {
           capturedCallback = callback;
           return Promise.resolve();
         },
@@ -689,7 +799,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
       let capturedCallback: ((events: any[]) => void) | null = null;
 
       mockStreamEventManager.subscribeStreamEvents.mockImplementation(
-        (operationId, lastEventId, callback, signal) => {
+        (operationId, lastEventId, callback, _signal) => {
           capturedCallback = callback;
           return new Promise(() => {});
         },
@@ -724,7 +834,7 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
       let capturedCallback: ((events: any[]) => void) | null = null;
 
       mockStreamEventManager.subscribeStreamEvents.mockImplementation(
-        (operationId, lastEventId, callback, signal) => {
+        (operationId, lastEventId, callback, _signal) => {
           capturedCallback = callback;
           return new Promise(() => {});
         },
@@ -777,8 +887,9 @@ data: {"type":"stream_end","timestamp":300,"operationId":"test-operation","data"
         },
       );
 
-      await GET(request);
+      const response = await GET(request);
 
+      expect(response.status).toBe(200);
       expect(capturedCallback).toBeDefined();
       expect(capturedSignal).toBeDefined();
       expect(capturedSignal!.aborted).toBe(false);

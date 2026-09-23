@@ -1,14 +1,12 @@
 import { type MetadataRoute } from 'next';
 
-import { Sitemap } from '@/server/sitemap';
 import { getCanonicalUrl } from '@/server/utils/url';
 
-// Robots文件缓存配置 - 24小时重新验证
-export const revalidate = 86_400; // 24小时 - 内容页面缓存
+// Robots file cache configuration - revalidate every 24 hours
+export const revalidate = 86_400; // 24 hours - content page cache
 export const dynamic = 'force-static';
 
 const robots = (): MetadataRoute.Robots => {
-  const sitemapModule = new Sitemap();
   return {
     host: getCanonicalUrl(),
     rules: [
@@ -26,11 +24,13 @@ const robots = (): MetadataRoute.Robots => {
       },
       {
         allow: ['/'],
-        disallow: ['/api/*', '/signin', '/signup', '/knowledge/*', '/share/*'],
+        // `/a/*` is the Agent Share visitor page: link-visible, creator-owned
+        // content that must never be indexed. `/agent/*` is the creator's own
+        // agent pages (and still forwards legacy share links).
+        disallow: ['/api/*', '/signin', '/signup', '/knowledge/*', '/share/*', '/agent/*', '/a/*'],
         userAgent: '*',
       },
     ],
-    sitemap: sitemapModule.getRobots(),
   };
 };
 

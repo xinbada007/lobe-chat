@@ -1,8 +1,11 @@
-import { ActionIcon, Button, DropdownMenu, Flexbox, Icon } from '@lobehub/ui';
+import { DropdownMenu, Flexbox, Icon } from '@lobehub/ui';
+import { ActionIcon, Button } from '@lobehub/ui/base-ui';
 import { InfoIcon, MoreVerticalIcon, Trash2 } from 'lucide-react';
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { useActiveWorkspaceSlug } from '@/business/client/hooks/useActiveWorkspaceSlug';
+import { buildLibraryPath, buildPagePath } from '@/features/ResourceManager/utils/resourcePath';
 import { useAgentStore } from '@/store/agent';
 import { useServerConfigStore } from '@/store/serverConfig';
 import { KnowledgeType } from '@/types/knowledgeBase';
@@ -17,6 +20,7 @@ const Actions = memo<ActionsProps>(({ id, type, enabled }) => {
   const { t } = useTranslation('chat');
 
   const mobile = useServerConfigStore((s) => s.isMobile);
+  const activeWorkspaceSlug = useActiveWorkspaceSlug();
   const [
     addFilesToAgent,
     addKnowledgeBasesToAgent,
@@ -52,21 +56,21 @@ const Actions = memo<ActionsProps>(({ id, type, enabled }) => {
   };
 
   return (
-    <Flexbox align={'center'} horizontal>
+    <Flexbox horizontal align={'center'}>
       {enabled ? (
         <DropdownMenu
+          placement="bottomRight"
           items={[
             {
               icon: <Icon icon={InfoIcon} />,
               key: 'detail',
               label: t('knowledgeBase.library.action.detail'),
               onClick: () => {
-                if (type === KnowledgeType.KnowledgeBase) {
-                  window.open(`/resource/library/${id}`);
-                  return;
-                }
-
-                window.open(`/resource?file=${id}`);
+                window.open(
+                  type === KnowledgeType.KnowledgeBase
+                    ? buildLibraryPath(id, activeWorkspaceSlug)
+                    : buildPagePath(id, activeWorkspaceSlug),
+                );
               },
             },
             {
@@ -77,16 +81,15 @@ const Actions = memo<ActionsProps>(({ id, type, enabled }) => {
               onClick: removeKnowledge,
             },
           ]}
-          placement="bottomRight"
         >
           <ActionIcon icon={MoreVerticalIcon} loading={loading} />
         </DropdownMenu>
       ) : (
         <Button
           loading={loading}
-          onClick={assignKnowledge}
           size={mobile ? 'small' : undefined}
           type={'primary'}
+          onClick={assignKnowledge}
         >
           {t('knowledgeBase.library.action.add')}
         </Button>

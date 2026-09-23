@@ -1,4 +1,5 @@
-import { Flexbox, Text } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,33 +12,32 @@ import UploadStatus from './UploadStatus';
 
 const styles = createStaticStyles(({ css }) => ({
   status: css`
-    &.ant-tag {
-      padding-inline: 0;
-      background: none;
-    }
+    padding-inline: 0;
+    background: none;
   `,
 }));
 
 interface UploadDetailProps {
+  error?: string;
   size: number;
   status: FileUploadStatus;
   tasks?: FileParsingTask;
   uploadState?: FileUploadState;
 }
 
-const UploadDetail = memo<UploadDetailProps>(({ uploadState, status, size, tasks }) => {
+const UploadDetail = memo<UploadDetailProps>(({ error, uploadState, status, size, tasks }) => {
   const { t } = useTranslation('chat');
 
   return (
-    <Flexbox align={'center'} gap={8} height={22} horizontal>
-      <UploadStatus size={size} status={status} uploadState={uploadState} />
+    <Flexbox horizontal align={'center'} gap={8} height={22}>
+      <UploadStatus error={error} size={size} status={status} uploadState={uploadState} />
       {!!tasks && Object.keys(tasks).length === 0 ? (
         <Text style={{ fontSize: 12 }} type={'secondary'}>
           {t('upload.preview.prepareTasks')}
         </Text>
       ) : (
         <div>
-          <FileParsingStatus {...tasks} className={styles.status} hideEmbeddingButton />
+          <FileParsingStatus {...tasks} hideEmbeddingButton className={styles.status} />
         </div>
       )}
     </Flexbox>

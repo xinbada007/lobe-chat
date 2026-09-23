@@ -2,8 +2,9 @@
 
 import type { InitDocumentArgs } from '@lobechat/editor-runtime';
 import type { BuiltinInspectorProps } from '@lobechat/types';
-import { Icon, Text } from '@lobehub/ui';
-import { createStaticStyles, cssVar, cx } from 'antd-style';
+import { Icon } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
+import { createStaticStyles, cssVar } from 'antd-style';
 import { Plus } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -37,8 +38,10 @@ export const InitPageInspector = memo<BuiltinInspectorProps<InitDocumentArgs, In
     if (isArgumentsStreaming) {
       if (!hasContent)
         return (
-          <div className={cx(oneLineEllipsis, shinyTextStyles.shinyText)}>
-            <span>{t('builtins.lobe-page-agent.apiName.initPage')}</span>
+          <div className={oneLineEllipsis}>
+            <span className={shinyTextStyles.shinyText}>
+              {t('builtins.lobe-page-agent.apiName.initPage')}
+            </span>
           </div>
         );
 
@@ -49,7 +52,7 @@ export const InitPageInspector = memo<BuiltinInspectorProps<InitDocumentArgs, In
             {t('builtins.lobe-page-agent.apiName.initPage.creating')}
           </span>
           {displayLines > 0 && (
-            <Text as={'span'} code color={cssVar.colorSuccess} fontSize={12}>
+            <Text code as={'span'} color={cssVar.colorSuccess} fontSize={12}>
               {' '}
               <Icon icon={Plus} size={12} />
               <AnimatedNumber value={displayLines} />
@@ -57,7 +60,7 @@ export const InitPageInspector = memo<BuiltinInspectorProps<InitDocumentArgs, In
             </Text>
           )}
           {chars > 0 && (
-            <Text as={'span'} code color={cssVar.colorTextDescription} fontSize={12}>
+            <Text code as={'span'} color={cssVar.colorTextDescription} fontSize={12}>
               {' '}
               <AnimatedNumber value={chars} />
               {t('builtins.lobe-page-agent.apiName.initPage.chars')}
@@ -73,14 +76,14 @@ export const InitPageInspector = memo<BuiltinInspectorProps<InitDocumentArgs, In
           {t('builtins.lobe-page-agent.apiName.initPage.result')}
         </span>
         {displayLines > 0 && (
-          <Text as={'span'} code color={cssVar.colorSuccess} fontSize={12}>
+          <Text code as={'span'} color={cssVar.colorSuccess} fontSize={12}>
             <Icon icon={Plus} size={12} />
             <AnimatedNumber value={displayLines} />
             {t('builtins.lobe-page-agent.apiName.initPage.lines')}
           </Text>
         )}
         {chars > 0 && (
-          <Text as={'span'} code color={cssVar.colorTextDescription} fontSize={12}>
+          <Text code as={'span'} color={cssVar.colorTextDescription} fontSize={12}>
             {' '}
             <AnimatedNumber value={chars} />
             {t('builtins.lobe-page-agent.apiName.initPage.chars')}

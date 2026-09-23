@@ -1,13 +1,20 @@
 /**
  * @vitest-environment happy-dom
  */
-import { type IEditor, moment } from '@lobehub/editor';
+import { type IEditor } from '@lobehub/editor';
+import { moment } from '@lobehub/editor';
 import { useEditor } from '@lobehub/editor/react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { memo, useEffect, useRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import InternalEditor, { type InternalEditorProps } from './InternalEditor';
+import { type InternalEditorProps } from './InternalEditor';
+import InternalEditor from './InternalEditor';
+import { registerBlockDecoratorCaretGuard } from './registerBlockDecoratorCaretGuard';
+
+vi.mock('./registerBlockDecoratorCaretGuard', () => ({
+  registerBlockDecoratorCaretGuard: vi.fn(() => vi.fn()),
+}));
 
 // Suppress console.warn for expected errors in tests
 const originalWarn = console.warn;
@@ -103,7 +110,7 @@ describe('InternalEditor', () => {
 
       // Find the Editor component's container
       const editorContainer = container.querySelector('[data-lexical-editor]')?.closest('div');
-      // The style should include paddingBottom: 64 (default) merged with custom styles
+      // The style should include paddingBottom: 32 (default) merged with custom styles
       expect(editorContainer).toBeTruthy();
     });
   });
@@ -147,10 +154,10 @@ describe('InternalEditor', () => {
       // When editor initializes with empty/undefined content, it should not throw
       const { container } = render(
         <MinimalTestWrapper
+          onInit={onInit}
           onEditorReady={(e) => {
             editorInstance = e;
           }}
-          onInit={onInit}
         />,
       );
 
@@ -245,6 +252,48 @@ describe('InternalEditor', () => {
       );
     });
 
+    it('should call onContentChange when formatting changes but text stays the same', async () => {
+      const onContentChange = vi.fn();
+      let editorInstance: IEditor | undefined;
+
+      render(
+        <MinimalTestWrapper
+          onContentChange={onContentChange}
+          onEditorReady={(e) => {
+            editorInstance = e;
+          }}
+        />,
+      );
+
+      await act(async () => {
+        await moment();
+      });
+
+      await waitFor(() => {
+        expect(editorInstance).toBeDefined();
+      });
+
+      await act(async () => {
+        editorInstance!.setDocument('text', 'Hello');
+        await moment();
+      });
+
+      onContentChange.mockClear();
+
+      await act(async () => {
+        // Keep the same plain text but change formatting structure.
+        editorInstance!.setDocument('markdown', '**Hello**');
+        await moment();
+      });
+
+      await waitFor(
+        () => {
+          expect(onContentChange).toHaveBeenCalled();
+        },
+        { timeout: 2000 },
+      );
+    });
+
     it('should track multiple content changes', async () => {
       const onContentChange = vi.fn();
       let editorInstance: IEditor | undefined;
@@ -288,6 +337,60 @@ describe('InternalEditor', () => {
         () => {
           // Should have multiple calls for different content changes
           expect(onContentChange.mock.calls.length).toBeGreaterThanOrEqual(2);
+        },
+        { timeout: 2000 },
+      );
+    });
+
+    it('should not call onContentChange for programmatic hydration while lock is active', async () => {
+      const onContentChange = vi.fn();
+      const contentChangeLockRef = { current: false };
+      let editorInstance: IEditor | undefined;
+
+      render(
+        <MinimalTestWrapper
+          contentChangeLockRef={contentChangeLockRef}
+          onContentChange={onContentChange}
+          onEditorReady={(e) => {
+            editorInstance = e;
+          }}
+        />,
+      );
+
+      await act(async () => {
+        await moment();
+      });
+
+      await waitFor(() => {
+        expect(editorInstance).toBeDefined();
+      });
+
+      await act(async () => {
+        editorInstance!.setDocument('text', 'Doc A');
+        await moment();
+      });
+
+      onContentChange.mockClear();
+
+      contentChangeLockRef.current = true;
+
+      await act(async () => {
+        editorInstance!.setDocument('text', 'Doc B');
+        await moment();
+      });
+
+      expect(onContentChange).not.toHaveBeenCalled();
+
+      contentChangeLockRef.current = false;
+
+      await act(async () => {
+        editorInstance!.setDocument('text', 'Doc B edited');
+        await moment();
+      });
+
+      await waitFor(
+        () => {
+          expect(onContentChange).toHaveBeenCalledTimes(1);
         },
         { timeout: 2000 },
       );
@@ -379,6 +482,58 @@ describe('InternalEditor', () => {
       const text = editorInstance!.getDocument('text') as unknown as string;
       expect(text).toContain('Heading');
       expect(text).toContain('Paragraph');
+    });
+  });
+
+  describe('block image caret guard', () => {
+    it('is not registered by default (document body keeps stock editor behaviour)', async () => {
+      vi.mocked(registerBlockDecoratorCaretGuard).mockClear();
+      let editorInstance: IEditor | undefined;
+
+      render(
+        <MinimalTestWrapper
+          onEditorReady={(e) => {
+            editorInstance = e;
+          }}
+        />,
+      );
+
+      await act(async () => {
+        await moment();
+      });
+      await waitFor(() => {
+        expect(editorInstance).toBeDefined();
+      });
+
+      expect(registerBlockDecoratorCaretGuard).not.toHaveBeenCalled();
+    });
+
+    it('registers the guard for the editor when blockImageCaretGuard is set and unregisters on unmount', async () => {
+      vi.mocked(registerBlockDecoratorCaretGuard).mockClear();
+      const unregister = vi.fn();
+      vi.mocked(registerBlockDecoratorCaretGuard).mockReturnValueOnce(unregister);
+      let editorInstance: IEditor | undefined;
+
+      const { unmount } = render(
+        <MinimalTestWrapper
+          blockImageCaretGuard
+          onEditorReady={(e) => {
+            editorInstance = e;
+          }}
+        />,
+      );
+
+      await act(async () => {
+        await moment();
+      });
+      await waitFor(() => {
+        expect(editorInstance).toBeDefined();
+      });
+
+      expect(registerBlockDecoratorCaretGuard).toHaveBeenCalledWith(editorInstance);
+
+      unmount();
+      expect(unregister).toHaveBeenCalled();
     });
   });
 

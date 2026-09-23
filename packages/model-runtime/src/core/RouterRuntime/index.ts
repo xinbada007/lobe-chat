@@ -1,4 +1,4 @@
-import { LobeRuntimeAI } from '../BaseAI';
+import type { LobeRuntimeAI } from '../BaseAI';
 
 export interface RuntimeItem {
   id: string;
@@ -6,5 +6,6 @@ export interface RuntimeItem {
   runtime: LobeRuntimeAI;
 }
 
-export type { UniformRuntime } from './createRuntime';
+export type { CreateRouterRuntimeOptions, UniformRuntime } from './createRuntime';
 export { createRouterRuntime } from './createRuntime';
+export type { RouteAttemptFinished, RouteAttemptResult } from './routeAttempt';

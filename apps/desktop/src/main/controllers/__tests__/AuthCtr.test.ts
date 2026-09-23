@@ -1,6 +1,6 @@
-import { DataSyncConfig } from '@lobechat/electron-client-ipc';
+import type { DataSyncConfig } from '@lobechat/electron-client-ipc';
 import { BrowserWindow, shell } from 'electron';
-import crypto from 'node:crypto';
+import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { App } from '@/core/App';
@@ -8,27 +8,25 @@ import type { App } from '@/core/App';
 import AuthCtr from '../AuthCtr';
 import RemoteServerConfigCtr from '../RemoteServerConfigCtr';
 
-// Mock logger
-vi.mock('@/utils/logger', () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  }),
-}));
-
 const { ipcMainHandleMock } = vi.hoisted(() => ({
   ipcMainHandleMock: vi.fn(),
 }));
 
 // Mock electron
 vi.mock('electron', () => ({
+  app: {
+    getVersion: vi.fn(() => '1.2.3'),
+  },
   BrowserWindow: {
     getAllWindows: vi.fn(() => []),
   },
   ipcMain: {
     handle: ipcMainHandleMock,
+  },
+  net: {
+    fetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+      global.fetch(input as any, init as any),
+    ),
   },
   shell: {
     openExternal: vi.fn().mockResolvedValue(undefined),
@@ -40,8 +38,8 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Mock electron-is
-vi.mock('electron-is', () => ({
+// Mock platform detection
+vi.mock('@/utils/platform', () => ({
   macOS: vi.fn(() => false),
   windows: vi.fn(() => false),
   linux: vi.fn(() => false),
@@ -60,7 +58,7 @@ vi.mock('@/const/env', () => ({
 let randomBytesCounter = 0;
 vi.mock('node:crypto', () => ({
   default: {
-    randomBytes: vi.fn((size: number) => {
+    randomBytes: vi.fn((_size: number) => {
       randomBytesCounter++;
       return {
         toString: vi.fn(() => `mock-random-${randomBytesCounter}`),
@@ -76,6 +74,7 @@ vi.mock('node:crypto', () => ({
 const mockRemoteServerConfigCtr = {
   clearTokens: vi.fn().mockResolvedValue(undefined),
   getAccessToken: vi.fn().mockResolvedValue('mock-access-token'),
+  getLastTokenRefreshAt: vi.fn().mockReturnValue(Date.now()),
   getRemoteServerConfig: vi.fn().mockResolvedValue({ active: true, storageMode: 'cloud' }),
   getRemoteServerUrl: vi.fn().mockImplementation(async (config?: DataSyncConfig) => {
     if (config?.storageMode === 'selfHost') {
@@ -84,6 +83,8 @@ const mockRemoteServerConfigCtr = {
     return 'https://lobehub-cloud.com'; // OFFICIAL_CLOUD_SERVER
   }),
   getTokenExpiresAt: vi.fn().mockReturnValue(Date.now() + 3600000),
+  isNonRetryableError: vi.fn().mockReturnValue(false),
+  isRemoteServerConfigured: vi.fn().mockResolvedValue(true),
   isTokenExpiringSoon: vi.fn().mockReturnValue(false),
   refreshAccessToken: vi.fn().mockResolvedValue({ success: true }),
   saveTokens: vi.fn().mockResolvedValue(undefined),
@@ -97,11 +98,12 @@ const mockApp = {
     }
     return null;
   }),
+  getService: vi.fn(() => null),
 } as unknown as App;
 
 describe('AuthCtr', () => {
   let authCtr: AuthCtr;
-  let mockFetch: ReturnType<typeof vi.fn>;
+  let mockFetch: Mock<(...args: any[]) => Promise<any>>;
   let mockWindow: any;
 
   beforeEach(() => {
@@ -191,6 +193,11 @@ describe('AuthCtr', () => {
           (call[0] as string).includes('/oidc/handoff'),
         );
         expect(pollingCalls.length).toBeGreaterThan(0);
+        expect(pollingCalls[0][1]).toEqual(
+          expect.objectContaining({
+            headers: expect.objectContaining({ 'User-Agent': 'LobeHub Desktop/1.2.3' }),
+          }),
+        );
       });
 
       it('should use self-hosted server URL when storageMode is selfHost', async () => {
@@ -710,5 +717,146 @@ describe('AuthCtr', () => {
       // Allow some tolerance for timing
       expect(handoffCalls.length).toBeLessThanOrEqual(5);
     }, 10000);
+  });
+
+  describe('Proactive Token Refresh', () => {
+    beforeEach(() => {
+      vi.mocked(mockRemoteServerConfigCtr.getRemoteServerConfig).mockResolvedValue({
+        active: true,
+        remoteServerUrl: 'https://lobehub-cloud.com',
+        storageMode: 'cloud',
+      });
+      vi.mocked(mockRemoteServerConfigCtr.isRemoteServerConfigured).mockResolvedValue(true);
+      vi.mocked(mockRemoteServerConfigCtr.getAccessToken).mockResolvedValue('mock-access-token');
+      vi.mocked(mockRemoteServerConfigCtr.getTokenExpiresAt).mockReturnValue(
+        Date.now() + 7 * 24 * 60 * 60 * 1000, // Token valid for 7 days
+      );
+      vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(false);
+      vi.mocked(mockRemoteServerConfigCtr.refreshAccessToken).mockResolvedValue({ success: true });
+      vi.mocked(mockRemoteServerConfigCtr.isNonRetryableError).mockReturnValue(false);
+    });
+
+    describe('onAppActivate', () => {
+      it('should refresh token when it is expiring soon', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).toHaveBeenCalled();
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith('tokenRefreshed');
+      });
+
+      it('should NOT refresh token when it is not expiring soon', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(false);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).not.toHaveBeenCalled();
+      });
+
+      it('should check expiry with a small buffer, not the 24h default', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(false);
+
+        await authCtr.onAppActivate();
+
+        const [buffer] = vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mock.calls[0];
+        expect(buffer).toBeGreaterThan(0);
+        expect(buffer).toBeLessThanOrEqual(60 * 60 * 1000);
+      });
+
+      it('should skip refresh when remote server is not active', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isRemoteServerConfigured).mockResolvedValue(false);
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).not.toHaveBeenCalled();
+      });
+
+      it('should skip refresh when no access token exists', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.getAccessToken).mockResolvedValue(null);
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).not.toHaveBeenCalled();
+      });
+
+      it('should clear tokens and require re-auth on non-retryable error', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+        vi.mocked(mockRemoteServerConfigCtr.refreshAccessToken).mockResolvedValue({
+          error: 'invalid_grant',
+          success: false,
+        });
+        vi.mocked(mockRemoteServerConfigCtr.isNonRetryableError).mockReturnValue(true);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.clearTokens).toHaveBeenCalled();
+        expect(mockRemoteServerConfigCtr.setRemoteServerConfig).toHaveBeenCalledWith({
+          active: false,
+        });
+        expect(mockWindow.webContents.send).toHaveBeenCalledWith(
+          'authorizationRequired',
+          expect.objectContaining({
+            reason: expect.stringContaining('startup:non_retryable'),
+          }),
+        );
+      });
+
+      it('should preserve tokens on transient error', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+        vi.mocked(mockRemoteServerConfigCtr.refreshAccessToken).mockResolvedValue({
+          error: 'network_error',
+          success: false,
+        });
+        vi.mocked(mockRemoteServerConfigCtr.isNonRetryableError).mockReturnValue(false);
+
+        await authCtr.onAppActivate();
+
+        expect(mockRemoteServerConfigCtr.clearTokens).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('afterAppReady (initializeAutoRefresh)', () => {
+      it('should proactively refresh on startup when token is expiring soon', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+
+        authCtr.afterAppReady();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).toHaveBeenCalled();
+      });
+
+      it('should NOT refresh on startup when token is not expiring soon', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(false);
+
+        authCtr.afterAppReady();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).not.toHaveBeenCalled();
+      });
+
+      it('should check expiry with a small buffer, not the 24h default', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(false);
+
+        authCtr.afterAppReady();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        const [buffer] = vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mock.calls[0];
+        expect(buffer).toBeGreaterThan(0);
+        expect(buffer).toBeLessThanOrEqual(60 * 60 * 1000);
+      });
+
+      it('should skip initialization when no access token exists', async () => {
+        vi.mocked(mockRemoteServerConfigCtr.getAccessToken).mockResolvedValue(null);
+        vi.mocked(mockRemoteServerConfigCtr.isTokenExpiringSoon).mockReturnValue(true);
+
+        authCtr.afterAppReady();
+        await new Promise((resolve) => setTimeout(resolve, 100));
+
+        expect(mockRemoteServerConfigCtr.refreshAccessToken).not.toHaveBeenCalled();
+      });
+    });
   });
 });

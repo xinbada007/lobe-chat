@@ -1,4 +1,5 @@
-import { Flexbox, Icon, Text } from '@lobehub/ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
 import { ArrowRight } from 'lucide-react';
 import { memo } from 'react';
@@ -37,7 +38,7 @@ const MoveFileItem = memo<MoveFileItemProps>(({ oldPath, newPath }) => {
   const displayNewPath = useElectronStore(desktopStateSelectors.displayRelativePath(newPath));
 
   return (
-    <Flexbox align="center" className={styles.item} gap={8} horizontal width="100%">
+    <Flexbox horizontal align="center" className={styles.item} gap={8} width="100%">
       <Flexbox flex={1}>
         <Text className={styles.path} type="secondary">
           {displayOldPath}

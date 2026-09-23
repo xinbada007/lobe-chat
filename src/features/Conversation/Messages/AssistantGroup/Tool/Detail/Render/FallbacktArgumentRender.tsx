@@ -1,4 +1,5 @@
-import { Block, Flexbox, Highlighter, Text } from '@lobehub/ui';
+import { Block, Flexbox, Highlighter } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { Divider } from 'antd';
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -41,13 +42,13 @@ export const FallbackArgumentRender = memo<FallbackArgumentRenderProps>(
             </Flexbox>
             <Highlighter
               language={language}
+              variant={'filled'}
               style={{
                 background: 'transparent',
                 borderRadius: 0,
                 maxHeight: 300,
                 overflow: 'auto',
               }}
-              variant={'filled'}
             >
               {data}
             </Highlighter>

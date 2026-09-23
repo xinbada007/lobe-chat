@@ -77,6 +77,7 @@ jobs:
     name: Check Release Version
     runs-on: ubuntu-latest
     outputs:
+      cloud_ref: ${{ steps.cloud-ref.outputs.cloud_ref }}
       is_stable: ${{ steps.check.outputs.is_stable }}
       version: ${{ steps.check.outputs.version }}
       is_manual: ${{ steps.check.outputs.is_manual }}
@@ -84,6 +85,8 @@ jobs:
     steps:
       - name: Check release info
         id: check
+        env:
+          RELEASE_BODY: ${{ github.event.release.body || '' }}
         run: |
           # 判断触发方式
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
@@ -100,7 +103,7 @@ jobs:
             version="${version#v}"
             echo "is_manual=false" >> $GITHUB_OUTPUT
             echo "version=${version}" >> $GITHUB_OUTPUT
-            release_body="${{ github.event.release.body }}"
+            release_body="${RELEASE_BODY:-}"
             {
               echo "release_notes<<EOF"
               printf '%s\n' "$release_body"
@@ -116,6 +119,32 @@ jobs:
             echo "is_stable=true" >> $GITHUB_OUTPUT
             echo "✅ Stable release detected: $version"
           fi
+
+      - name: Resolve Cloud revision
+        id: cloud-ref
+        if: steps.check.outputs.is_stable == 'true'
+        env:
+          CLOUD_REPOSITORY: ${{ vars.OVERLAY_REPOSITORY }}
+          CLOUD_TOKEN: ${{ secrets.LOBEHUB_CLOUD_TOKEN }}
+        run: |
+          set -euo pipefail
+          : "${CLOUD_REPOSITORY:?OVERLAY_REPOSITORY repository variable is not set}"
+          # checkout persist-credentials extraheader would send GITHUB_TOKEN and 404 the private cloud repo
+          cloud_ref=$(git -c http.https://github.com/.extraheader= ls-remote "https://x-access-token:${CLOUD_TOKEN}@github.com/${CLOUD_REPOSITORY}.git" HEAD | cut -f1)
+          if [[ ! "$cloud_ref" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Unable to resolve Cloud revision"
+            exit 1
+          fi
+          echo "cloud_ref=$cloud_ref" >> "$GITHUB_OUTPUT"
+
+  renderer-ota:
+    name: Publish Renderer OTA
+    needs: [check-stable]
+    if: ${{ needs.check-stable.outputs.is_stable == 'true' && (github.event_name != 'workflow_dispatch' || !inputs.skip_s3_upload) }}
+    uses: ./.github/workflows/release-desktop-renderer-ota.yml
+    with:
+      channel: stable
+    secrets: inherit
 
   # ============================================
   # 配置构建矩阵 (检查自托管 Runner)
@@ -145,7 +174,7 @@ jobs:
           fi
 
           # macOS (ARM64)
-          # 使用 GitHub Hosted Runner
+          # 使用 GitHub Hosted Runner (macos-15 修复 hdiutil 问题)
           if [[ "${{ github.event_name }}" != "workflow_dispatch" ]] || [[ "${{ inputs.build_mac }}" == "true" ]]; then
             echo "Using GitHub-Hosted Runner for macOS ARM64"
             arm_entry='{"os": "macos-15", "name": "macos-arm64"}'
@@ -173,25 +202,48 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.configure-build.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@v7
 
       - name: Setup build environment
+        id: setup
         uses: ./.github/actions/desktop-build-setup
         with:
+          cloud-ref: ${{ needs.check-stable.outputs.cloud_ref }}
+          cloud-repository: ${{ vars.OVERLAY_REPOSITORY }}
+          cloud-token: ${{ secrets.LOBEHUB_CLOUD_TOKEN }}
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Set package version
+        id: app_version
         run: npm run workflow:set-desktop-version ${{ needs.check-stable.outputs.version }} stable
+
+      # macOS 构建前清理 (修复 hdiutil 问题 https://github.com/electron-userland/electron-builder/issues/8415)
+      - name: Clean previous build artifacts (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          sudo rm -rf apps/desktop/release || true
+          sudo rm -rf apps/desktop/dist || true
+          sudo rm -rf /tmp/electron-builder* || true
+
+      - name: Prepare macOS provisioning profile
+        if: runner.os == 'macOS'
+        env:
+          MAC_PROVISIONING_PROFILE_BASE64: ${{ secrets.MAC_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          if [ -n "$MAC_PROVISIONING_PROFILE_BASE64" ]; then
+            printf '%s' "$MAC_PROVISIONING_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/lobehub.provisionprofile"
+            echo "MAC_PROVISIONING_PROFILE=$RUNNER_TEMP/lobehub.provisionprofile" >> "$GITHUB_ENV"
+          fi
 
       # macOS 构建
       - name: Build artifact on macOS
+        id: build_macos
         if: runner.os == 'macOS'
-        run: npm run desktop:build
+        run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          RENDERER_OTA_PUBLIC_KEY: ${{ secrets.RENDERER_OTA_PUBLIC_KEY }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
@@ -204,14 +256,18 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NEXT_PUBLIC_DESKTOP_PROJECT_ID: ${{ secrets.UMAMI_STABLE_DESKTOP_PROJECT_ID }}
           NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.UMAMI_STABLE_DESKTOP_BASE_URL }}
+          # Debug hdiutil issues (https://github.com/electron-userland/electron-builder/issues/8415)
+          DEBUG_DMG: true
 
       # Windows 构建
       - name: Build artifact on Windows
+        id: build_windows
         if: runner.os == 'Windows'
-        run: npm run desktop:build
+        run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          RENDERER_OTA_PUBLIC_KEY: ${{ secrets.RENDERER_OTA_PUBLIC_KEY }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
@@ -223,13 +279,13 @@ jobs:
 
       # Linux 构建
       - name: Build artifact on Linux
+        id: build_linux
         if: runner.os == 'Linux'
-        run: |
-          npm run desktop:build
-          tar -czf apps/desktop/release/lobehub-renderer.tar.gz -C out .
+        run: npm run desktop:package:app
         env:
           UPDATE_CHANNEL: stable
           UPDATE_SERVER_URL: ${{ secrets.UPDATE_SERVER_URL }}
+          RENDERER_OTA_PUBLIC_KEY: ${{ secrets.RENDERER_OTA_PUBLIC_KEY }}
           RELEASE_NOTES: ${{ needs.check-stable.outputs.release_notes }}
           APP_URL: http://localhost:3015
           DATABASE_URL: 'postgresql://postgres@localhost:5432/postgres'
@@ -238,33 +294,40 @@ jobs:
           NEXT_PUBLIC_DESKTOP_UMAMI_BASE_URL: ${{ secrets.UMAMI_STABLE_DESKTOP_BASE_URL }}
 
       - name: Upload artifacts
+        id: upload
         uses: ./.github/actions/desktop-upload-artifacts
         with:
           artifact-name: release-${{ matrix.name }}
+          renderer-ota-private-key: ${{ secrets.RENDERER_OTA_PRIVATE_KEY }}
+          renderer-ota-public-key: ${{ secrets.RENDERER_OTA_PUBLIC_KEY }}
+          update-channel: stable
+
+      - name: Preserve desktop build diagnostics
+        if: always()
+        uses: ./.github/actions/desktop-ota-diagnostics
+        with:
+          kind: build
+          channel: stable
+          steps-json: ${{ toJSON(steps) }}
+          job-status: ${{ job.status }}
 
   # ============================================
   # 合并 macOS 多架构文件
   # ============================================
   merge-mac-files:
-    needs: [build, check-stable]
+    needs: [build, check-stable, configure-build]
     name: Merge macOS Release Files
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
         with:
           node-version: ${{ env.NODE_VERSION }}
-          package-manager-cache: false
-
-      - name: Install bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
 
       - name: Download artifacts
         uses: actions/download-artifact@v7
@@ -272,6 +335,17 @@ jobs:
           path: release
           pattern: release-*
           merge-multiple: true
+
+      - name: Validate platform renderer hashes
+        env:
+          BUILD_MATRIX: ${{ needs.configure-build.outputs.matrix }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { validateReleaseInputs } from './apps/desktop/scripts/validateMainHash.mjs';
+          const expected = JSON.parse(process.env.BUILD_MATRIX).include.map(({ name }) => `release-${name}`);
+          const manifest = await validateReleaseInputs('release', expected);
+          console.log(`Validated ${expected.length} platform hashes: ${manifest.mainHash}`);
+          NODE
 
       - name: List downloaded artifacts
         run: ls -R release
@@ -284,7 +358,7 @@ jobs:
           fi
           bun add --no-save yaml@2.8.1
 
-      - name: Merge latest-mac.yml files
+      - name: Merge mac YAML files
         run: bun run scripts/electronWorkflow/mergeMacReleaseFiles.js
 
       - name: Upload artifacts with merged macOS files
@@ -306,6 +380,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.LOBEHUB_BOT_APP_ID }}
+          private-key: ${{ secrets.LOBEHUB_BOT_APP_PRIVATE_KEY }}
+
       - name: Download merged artifacts
         uses: actions/download-artifact@v7
         with:
@@ -334,20 +414,10 @@ jobs:
             release/*.rpm*
             release/*.tar.gz*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
 
   # ============================================
   # 发布到 S3 更新服务器
-  # ============================================
-  # S3 目录结构:
-  #   s3://bucket/
-  #     stable/
-  #       stable-mac.yml      ← electron-updater 检查更新 (stable channel)
-  #       stable.yml          ← Windows (stable channel)
-  #       stable-linux.yml    ← Linux (stable channel)
-  #       latest-mac.yml      ← fallback for GitHub provider
-  #       {version}/          ← 版本目录
-  #         *.dmg, *.zip, *.exe, ...
   # ============================================
   publish-s3:
     needs: [merge-mac-files, check-stable]
@@ -356,117 +426,22 @@ jobs:
     # 手动触发时可选择跳过
     if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.skip_s3_upload) }}
     steps:
-      - name: Download merged artifacts
-        uses: actions/download-artifact@v7
+      - uses: actions/create-github-app-token@v2
+        id: app-token
         with:
-          name: merged-release
-          path: release
+          app-id: ${{ vars.LOBEHUB_BOT_APP_ID }}
+          private-key: ${{ secrets.LOBEHUB_BOT_APP_PRIVATE_KEY }}
 
-      - name: List artifacts to upload
-        run: |
-          echo "📦 Artifacts to upload to S3:"
-          ls -lah release/
-          echo ""
-          echo "📋 Version: ${{ needs.check-stable.outputs.version }}"
-
-      - name: Upload to S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.UPDATE_AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.UPDATE_AWS_SECRET_ACCESS_KEY }}
-          AWS_REGION: ${{ secrets.UPDATE_S3_REGION || 'us-east-1' }}
-          S3_BUCKET: ${{ secrets.UPDATE_S3_BUCKET }}
-          S3_ENDPOINT: ${{ secrets.UPDATE_S3_ENDPOINT }}
-          VERSION: ${{ needs.check-stable.outputs.version }}
-        run: |
-          if [ -z "$S3_BUCKET" ]; then
-            echo "⚠️ UPDATE_S3_BUCKET is not configured, skipping S3 upload"
-            echo ""
-            echo "To enable S3 upload, configure the following secrets:"
-            echo "  - UPDATE_AWS_ACCESS_KEY_ID"
-            echo "  - UPDATE_AWS_SECRET_ACCESS_KEY"
-            echo "  - UPDATE_S3_BUCKET"
-            echo "  - UPDATE_S3_REGION (optional, defaults to us-east-1)"
-            echo "  - UPDATE_S3_ENDPOINT (optional, for S3-compatible services)"
-            exit 0
-          fi
-
-          # 构建端点参数
-          ENDPOINT_ARG=""
-          if [ -n "$S3_ENDPOINT" ]; then
-            ENDPOINT_ARG="--endpoint-url $S3_ENDPOINT"
-            echo "📡 Using custom S3 endpoint: $S3_ENDPOINT"
-          fi
-
-          echo "🚀 Uploading to S3 bucket: $S3_BUCKET"
-          echo "📁 Target path: s3://$S3_BUCKET/stable/"
-          echo ""
-
-          # 1. 上传安装包到版本目录
-          echo "📦 Uploading release files to s3://$S3_BUCKET/stable/$VERSION/"
-          for file in release/*.dmg release/*.zip release/*.exe release/*.AppImage release/*.deb release/*.rpm release/*.snap release/*.tar.gz; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              echo "   ↗️ $filename"
-              aws s3 cp "$file" "s3://$S3_BUCKET/stable/$VERSION/$filename" $ENDPOINT_ARG
-            fi
-          done
-
-          # 2. 创建 stable*.yml (从 latest*.yml 复制，并修改 URL 加上版本目录前缀)
-          # electron-updater 在 channel=stable 时会找 stable-mac.yml
-          # S3 目录结构: stable/{version}/xxx.dmg，所以 URL 需要加上 {version}/ 前缀
-          echo ""
-          echo "📋 Creating stable*.yml files from latest*.yml..."
-          for yml in release/latest*.yml; do
-            if [ -f "$yml" ]; then
-              stable_name=$(basename "$yml" | sed 's/latest/stable/')
-              # 复制并修改 URL: 给所有 url 字段加上版本目录前缀
-              # url: xxx.dmg -> url: {VERSION}/xxx.dmg
-              sed "s|url: |url: $VERSION/|g" "$yml" > "release/$stable_name"
-              echo "   📄 Created $stable_name from $(basename $yml) with URL prefix: $VERSION/"
-            fi
-          done
-
-          # 3. 创建 renderer manifest (用于验证 renderer tar 完整性)
-          echo ""
-          echo "📋 Creating renderer manifest..."
-          RENDERER_TAR="release/lobehub-renderer.tar.gz"
-          if [ -f "$RENDERER_TAR" ]; then
-            RENDERER_SHA512=$(shasum -a 512 "$RENDERER_TAR" | awk '{print $1}' | xxd -r -p | base64)
-            RENDERER_SIZE=$(stat -f%z "$RENDERER_TAR" 2>/dev/null || stat -c%s "$RENDERER_TAR")
-            RELEASE_DATE=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-            echo "version: $VERSION" > "release/stable-renderer.yml"
-            echo "files:" >> "release/stable-renderer.yml"
-            echo "  - url: $VERSION/lobehub-renderer.tar.gz" >> "release/stable-renderer.yml"
-            echo "    sha512: $RENDERER_SHA512" >> "release/stable-renderer.yml"
-            echo "    size: $RENDERER_SIZE" >> "release/stable-renderer.yml"
-            echo "path: $VERSION/lobehub-renderer.tar.gz" >> "release/stable-renderer.yml"
-            echo "sha512: $RENDERER_SHA512" >> "release/stable-renderer.yml"
-            echo "releaseDate: '$RELEASE_DATE'" >> "release/stable-renderer.yml"
-            echo "   📄 Created stable-renderer.yml with SHA512 checksum"
-          else
-            echo "   ⚠️ Renderer tar not found, skipping manifest creation"
-          fi
-
-          # 4. 上传 manifest 到根目录和版本目录
-          # 根目录: electron-updater 需要，会被每次发版覆盖
-          # 版本目录: 作为存档保留
-          echo ""
-          echo "📋 Uploading manifest files..."
-          for yml in release/stable*.yml release/latest*.yml; do
-            if [ -f "$yml" ]; then
-              filename=$(basename "$yml")
-              echo "   ↗️ $filename -> s3://$S3_BUCKET/stable/$filename"
-              aws s3 cp "$yml" "s3://$S3_BUCKET/stable/$filename" $ENDPOINT_ARG
-              echo "   ↗️ $filename -> s3://$S3_BUCKET/stable/$VERSION/$filename (archive)"
-              aws s3 cp "$yml" "s3://$S3_BUCKET/stable/$VERSION/$filename" $ENDPOINT_ARG
-            fi
-          done
-
-          echo ""
-          echo "✅ S3 upload completed!"
-          echo ""
-          echo "📋 Files in s3://$S3_BUCKET/stable/:"
-          aws s3 ls "s3://$S3_BUCKET/stable/" $ENDPOINT_ARG || true
-          echo ""
-          echo "📋 Files in s3://$S3_BUCKET/stable/$VERSION/:"
-          aws s3 ls "s3://$S3_BUCKET/stable/$VERSION/" $ENDPOINT_ARG || true
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: ./.github/actions/desktop-publish-s3
+        with:
+          channel: stable
+          cloud-ref: ${{ needs.check-stable.outputs.cloud_ref }}
+          version: ${{ needs.check-stable.outputs.version }}
+          aws-access-key-id: ${{ secrets.UPDATE_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.UPDATE_AWS_SECRET_ACCESS_KEY }}
+          s3-bucket: ${{ secrets.UPDATE_S3_BUCKET }}
+          s3-region: ${{ secrets.UPDATE_S3_REGION }}
+          s3-endpoint: ${{ secrets.UPDATE_S3_ENDPOINT }}

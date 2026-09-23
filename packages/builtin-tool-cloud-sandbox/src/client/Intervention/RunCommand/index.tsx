@@ -1,7 +1,8 @@
 'use client';
 
-import { type BuiltinInterventionProps } from '@lobechat/types';
-import { Flexbox, Highlighter, Text } from '@lobehub/ui';
+import type { BuiltinInterventionProps } from '@lobechat/types';
+import { Flexbox, Highlighter } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 
 interface RunCommandParams {
@@ -24,7 +25,7 @@ const RunCommand = memo<BuiltinInterventionProps<RunCommandParams>>(({ args }) =
     <Flexbox gap={8}>
       <Flexbox horizontal justify={'space-between'}>
         <Text>Execute command in cloud sandbox</Text>
-        <Flexbox gap={8} horizontal>
+        <Flexbox horizontal gap={8}>
           {background && (
             <Text style={{ fontSize: 12 }} type={'secondary'}>
               background
@@ -39,11 +40,11 @@ const RunCommand = memo<BuiltinInterventionProps<RunCommandParams>>(({ args }) =
       </Flexbox>
       {command && (
         <Highlighter
+          wrap
           language={'sh'}
           showLanguage={false}
           style={{ padding: '4px 8px' }}
           variant={'outlined'}
-          wrap
         >
           {command}
         </Highlighter>

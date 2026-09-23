@@ -2,6 +2,7 @@
  * Shared tool filtering logic used across both runtime (ToolsEngine)
  * and display layer (selectors)
  */
+import { AuvManifest } from '@lobechat/builtin-tool-auv';
 import { LocalSystemManifest } from '@lobechat/builtin-tool-local-system';
 import { isDesktop } from '@lobechat/const';
 
@@ -11,15 +12,10 @@ import { isDesktop } from '@lobechat/const';
  * @returns true if the tool should be enabled, false otherwise
  */
 export const shouldEnableTool = (toolId: string): boolean => {
-  // Filter LocalSystem tool in non-desktop environment
-  if (toolId === LocalSystemManifest.identifier) {
+  // These executors call Electron IPC and cannot run in a plain web client.
+  if (toolId === LocalSystemManifest.identifier || toolId === AuvManifest.identifier) {
     return isDesktop;
   }
-
-  // Add more platform-specific filters here as needed
-  // if (toolId === SomeOtherPlatformSpecificTool.identifier) {
-  //   return someCondition;
-  // }
 
   return true;
 };

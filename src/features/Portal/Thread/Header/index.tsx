@@ -1,4 +1,5 @@
-import { ActionIcon, Flexbox } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { ActionIcon } from '@lobehub/ui/base-ui';
 import { cssVar } from 'antd-style';
 import { ArrowLeftRight, XIcon } from 'lucide-react';
 import { memo } from 'react';
@@ -21,24 +22,24 @@ const Header = memo(() => {
       left={<Title />}
       paddingBlock={6}
       paddingInline={8}
+      showTogglePanelButton={false}
       right={
-        <Flexbox gap={4} horizontal>
+        <Flexbox horizontal gap={4}>
           {hasPortal && (
             <ActionIcon
               icon={ArrowLeftRight}
+              size={'small'}
               onClick={() => {
                 if (!portalThreadId) return;
 
                 switchThread(portalThreadId);
                 closeThreadPortal();
               }}
-              size={'small'}
             />
           )}
-          <ActionIcon icon={XIcon} onClick={closeThreadPortal} size={'small'} />
+          <ActionIcon icon={XIcon} size={'small'} onClick={closeThreadPortal} />
         </Flexbox>
       }
-      showTogglePanelButton={false}
       style={{
         borderBottom: `1px solid ${cssVar.colorBorderSecondary}`,
       }}

@@ -1,14 +1,15 @@
-import { ModelTag } from '@lobehub/icons';
-import { Center, Flexbox, Icon, Markdown, Text } from '@lobehub/ui';
+import { Center, Flexbox, Icon, Markdown } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ScrollText } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { agentChatConfigSelectors } from '@/store/agent/selectors';
+import { ModelTag } from '@/components/LobeIcons';
+import { chatConfigByIdSelectors } from '@/store/agent/selectors';
 import { useAgentStore } from '@/store/agent/store';
 
-import { dataSelectors, useConversationStore } from '../../store';
+import { contextSelectors, dataSelectors, useConversationStore } from '../../store';
 import HistoryDivider from './HistoryDivider';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
@@ -33,8 +34,9 @@ const History = memo(() => {
     return [history?.content, history?.model];
   });
 
+  const agentId = useConversationStore(contextSelectors.agentId);
   const enableCompressHistory = useAgentStore(
-    (s) => agentChatConfigSelectors.currentChatConfig(s).enableCompressHistory,
+    (s) => chatConfigByIdSelectors.getChatConfigById(agentId)(s).enableCompressHistory,
   );
 
   return (
@@ -42,7 +44,7 @@ const History = memo(() => {
       <HistoryDivider enable />
       {enableCompressHistory && !!content && (
         <Flexbox className={styles.container} gap={8}>
-          <Flexbox align={'flex-start'} gap={8} horizontal>
+          <Flexbox horizontal align={'flex-start'} gap={8}>
             <Center height={20} width={20}>
               <Icon icon={ScrollText} size={16} style={{ color: cssVar.colorTextDescription }} />
             </Center>
@@ -53,7 +55,7 @@ const History = memo(() => {
               </div>
             )}
           </Flexbox>
-          <Flexbox align={'flex-start'} gap={8} horizontal>
+          <Flexbox horizontal align={'flex-start'} gap={8}>
             <Flexbox align={'center'} padding={8} width={20}>
               <div className={styles.line} />
             </Flexbox>

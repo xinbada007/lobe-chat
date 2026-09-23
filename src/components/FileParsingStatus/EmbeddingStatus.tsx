@@ -1,10 +1,12 @@
-import { Flexbox, Icon, Tag, Tooltip } from '@lobehub/ui';
+import { Flexbox, Icon, Tooltip } from '@lobehub/ui';
+import { Tag } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { BoltIcon, RotateCwIcon } from 'lucide-react';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { AsyncTaskStatus, type FileParsingTask } from '@/types/asyncTask';
+import { type FileParsingTask } from '@/types/asyncTask';
+import { AsyncTaskStatus } from '@/types/asyncTask';
 
 const styles = createStaticStyles(({ css, cssVar }) => ({
   errorReason: css`
@@ -33,15 +35,15 @@ const EmbeddingStatus = memo<EmbeddingStatusProps>(
         return (
           <Flexbox horizontal>
             <Tooltip
+              title={t('FileParsingStatus.chunks.embeddingStatus.processing')}
               styles={{
                 root: { pointerEvents: 'none' },
               }}
-              title={t('FileParsingStatus.chunks.embeddingStatus.processing')}
             >
               <Tag
                 className={cx('chunk-tag', className)}
                 color={'processing'}
-                icon={<Icon icon={BoltIcon} spin />}
+                icon={<Icon spin icon={BoltIcon} />}
                 style={{ cursor: 'pointer' }}
                 variant={'filled'}
               >
@@ -76,11 +78,11 @@ const EmbeddingStatus = memo<EmbeddingStatusProps>(
               {t('FileParsingStatus.chunks.embeddingStatus.error')}{' '}
               <Icon
                 icon={RotateCwIcon}
+                style={{ cursor: 'pointer' }}
+                title={t('retry', { ns: 'common' })}
                 onClick={() => {
                   onErrorClick?.('embedding');
                 }}
-                style={{ cursor: 'pointer' }}
-                title={t('retry', { ns: 'common' })}
               />
             </Tag>
           </Tooltip>
@@ -98,11 +100,11 @@ const EmbeddingStatus = memo<EmbeddingStatusProps>(
                 className={cx('chunk-tag', className)}
                 color={'purple'}
                 icon={<Icon icon={BoltIcon} />}
+                style={{ cursor: 'pointer' }}
+                variant={'filled'}
                 onClick={() => {
                   onClick?.(AsyncTaskStatus.Success);
                 }}
-                style={{ cursor: 'pointer' }}
-                variant={'filled'}
               >
                 {chunkCount}
               </Tag>

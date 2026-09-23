@@ -1,4 +1,4 @@
-import dayjs from 'dayjs';
+import type dayjs from 'dayjs';
 import { eq, sql } from 'drizzle-orm';
 import { describe, expect, it } from 'vitest';
 
@@ -143,6 +143,26 @@ describe('genWhere', () => {
 
       expect(result).toBeDefined();
       expect(result?.constructor.name).toBe('SQL');
+    });
+
+    it('should extend date-only values through the end of that day', () => {
+      let bound: string | undefined;
+      genEndDateWhere('2026-09-01', mockKey, (date) => {
+        bound = date.toISOString();
+        return date.toDate();
+      });
+
+      expect(bound).toBe('2026-09-02T00:00:00.000Z');
+    });
+
+    it('should use precise ISO timestamps as the exact upper bound', () => {
+      let bound: string | undefined;
+      genEndDateWhere('2026-09-01T12:00:00Z', mockKey, (date) => {
+        bound = date.toISOString();
+        return date.toDate();
+      });
+
+      expect(bound).toBe('2026-09-01T12:00:00.000Z');
     });
 
     it('should handle timestamp number as string', () => {

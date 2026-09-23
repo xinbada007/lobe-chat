@@ -32,9 +32,6 @@ FROM base AS builder
 ARG USE_CN_MIRROR
 ARG NEXT_PUBLIC_BASE_PATH
 ARG NEXT_PUBLIC_SENTRY_DSN
-ARG NEXT_PUBLIC_ANALYTICS_POSTHOG
-ARG NEXT_PUBLIC_POSTHOG_HOST
-ARG NEXT_PUBLIC_POSTHOG_KEY
 ARG NEXT_PUBLIC_ANALYTICS_UMAMI
 ARG NEXT_PUBLIC_UMAMI_SCRIPT_URL
 ARG NEXT_PUBLIC_UMAMI_WEBSITE_ID
@@ -54,11 +51,6 @@ ENV NEXT_PUBLIC_SENTRY_DSN="${NEXT_PUBLIC_SENTRY_DSN}" \
     SENTRY_ORG="" \
     SENTRY_PROJECT=""
 
-# Posthog
-ENV NEXT_PUBLIC_ANALYTICS_POSTHOG="${NEXT_PUBLIC_ANALYTICS_POSTHOG}" \
-    NEXT_PUBLIC_POSTHOG_HOST="${NEXT_PUBLIC_POSTHOG_HOST}" \
-    NEXT_PUBLIC_POSTHOG_KEY="${NEXT_PUBLIC_POSTHOG_KEY}"
-
 # Umami
 ENV NEXT_PUBLIC_ANALYTICS_UMAMI="${NEXT_PUBLIC_ANALYTICS_UMAMI}" \
     NEXT_PUBLIC_UMAMI_SCRIPT_URL="${NEXT_PUBLIC_UMAMI_SCRIPT_URL}" \
@@ -73,9 +65,14 @@ COPY package.json pnpm-workspace.yaml ./
 COPY .npmrc ./
 COPY packages ./packages
 COPY patches ./patches
-# bring in desktop workspace manifest so pnpm can resolve it
+# workspace manifests must exist before pnpm i so --filter can resolve them
 COPY apps/desktop/src/main/package.json ./apps/desktop/src/main/package.json
+COPY apps/share/package.json ./apps/share/package.json
+COPY apps/workbench/package.json ./apps/workbench/package.json
 
+# @neondatabase/serverless is required at load time by drizzle-orm/neon-serverless, which the
+# bundled Elasticsearch sync CLI imports through the shared server DB factory even when
+# DATABASE_DRIVER=node selects the pg driver; without it the sync container crash-loops.
 RUN set -e && \
     if [ "${USE_CN_MIRROR:-false}" = "true" ]; then \
         export SENTRYCLI_CDNURL="https://npmmirror.com/mirrors/sentry-cli"; \
@@ -89,24 +86,24 @@ RUN set -e && \
     pnpm i && \
     mkdir -p /deps && \
     cd /deps && \
-    pnpm init && \
-    pnpm add pg drizzle-orm
+    echo '{"name":"deps","private":true}' > package.json && \
+    pnpm add pg drizzle-orm @neondatabase/serverless
 
 COPY . .
 
+# Prebuild: env checks (checkDeprecatedAuth, checkRequiredEnvVars, printEnvInfo) then remove desktop-only code
+RUN pnpm exec tsx scripts/dockerPrebuild.mts
+RUN rm -rf src/app/desktop "src/app/(backend)/trpc/desktop"
+
 # run build standalone for docker version
 RUN npm run build:docker
+RUN pnpm exec esbuild scripts/elasticsearchReindex/index.ts --bundle --platform=node --format=cjs --outfile=/app/fts-search-elasticsearch-reindex.cjs --external:pg --external:drizzle-orm '--external:drizzle-orm/*'
+RUN pnpm exec esbuild scripts/elasticsearchSync/cli.ts --bundle --platform=node --format=cjs --outfile=/app/fts-search-elasticsearch-sync.cjs --external:pg --external:drizzle-orm '--external:drizzle-orm/*'
+RUN pnpm exec esbuild scripts/elasticsearchCleanupIneligibleMessages/cli.ts --bundle --platform=node --format=cjs --outfile=/app/fts-search-ineligible-message-cleanup.cjs --external:pg --external:drizzle-orm '--external:drizzle-orm/*'
+RUN pnpm exec esbuild scripts/pgSearchCleanup/index.ts --bundle --platform=node --format=cjs --outfile=/app/fts-search-pg-search-cleanup.cjs --external:pg
 
-# Prepare desktop export assets for Electron packaging (if generated)
-RUN set -e && \
-    if [ -d "/app/out" ]; then \
-        mkdir -p /app/apps/desktop/dist/next && \
-        cp -a /app/out/. /app/apps/desktop/dist/next/ && \
-        echo "Copied Next export output into /app/apps/desktop/dist/next"; \
-    else \
-        echo "No Next export output found at /app/out, creating empty directory" && \
-        mkdir -p /app/apps/desktop/dist/next; \
-    fi
+# Preserve SWC helpers referenced through pnpm virtual-store symlinks by Next.js.
+RUN mkdir -p /runtime-deps && cp -a node_modules/.pnpm/@swc+helpers@* /runtime-deps/
 
 ## Application image, copy all the files for production
 FROM busybox:latest AS app
@@ -116,26 +113,38 @@ COPY --from=base /distroless/ /
 # Automatically leverage output traces to reduce image size
 # https://nextjs.org/docs/advanced-features/output-file-tracing
 COPY --from=builder /app/.next/standalone /app/
-# Copy Next export output for desktop renderer
-COPY --from=builder /app/apps/desktop/dist/next /app/apps/desktop/dist/next
-
+COPY --from=builder /app/.next/static /app/.next/static
+# Copy SPA assets (Vite build output)
+COPY --from=builder /app/public/_spa /app/public/_spa
+COPY --from=builder /app/public/_spa-share /app/public/_spa-share
+COPY --from=builder /app/public/_spa-workbench /app/public/_spa-workbench
 # Copy database migrations
 COPY --from=builder /app/packages/database/migrations /app/migrations
 COPY --from=builder /app/scripts/migrateServerDB/docker.cjs /app/docker.cjs
 COPY --from=builder /app/scripts/migrateServerDB/errorHint.js /app/errorHint.js
+COPY --from=builder /app/fts-search-elasticsearch-reindex.cjs /app/fts-search-elasticsearch-reindex.cjs
+COPY --from=builder /app/fts-search-elasticsearch-sync.cjs /app/fts-search-elasticsearch-sync.cjs
+COPY --from=builder /app/fts-search-ineligible-message-cleanup.cjs /app/fts-search-ineligible-message-cleanup.cjs
+COPY --from=builder /app/fts-search-pg-search-cleanup.cjs /app/fts-search-pg-search-cleanup.cjs
 
 # copy dependencies
 COPY --from=builder /deps/node_modules/.pnpm /app/node_modules/.pnpm
 COPY --from=builder /deps/node_modules/pg /app/node_modules/pg
+COPY --from=builder /runtime-deps/ /app/node_modules/.pnpm/
 COPY --from=builder /deps/node_modules/drizzle-orm /app/node_modules/drizzle-orm
+COPY --from=builder /deps/node_modules/@neondatabase /app/node_modules/@neondatabase
 
 # Copy server launcher and shared scripts
 COPY --from=builder /app/scripts/serverLauncher/startServer.js /app/startServer.js
 COPY --from=builder /app/scripts/_shared /app/scripts/_shared
 
+# /app/.elasticsearch-reindex is the default checkpoint directory of the Elasticsearch reindex
+# command. Creating it here lets a Docker named volume mounted on it inherit nextjs ownership so
+# the one-off Compose service can write checkpoints without running as root.
 RUN set -e && \
     addgroup -S -g 1001 nodejs && \
     adduser -D -G nodejs -H -S -h /app -u 1001 nextjs && \
+    mkdir -p /app/.elasticsearch-reindex && \
     chown -R nextjs:nodejs /app /etc/proxychains4.conf
 
 ## Production image, copy all the files and run next
@@ -151,7 +160,7 @@ ENV NODE_ENV="production" \
     SSL_CERT_FILE="/etc/ssl/certs/ca-certificates.crt"
 
 # Make the middleware rewrite through local as default
-# refs: https://github.com/lobehub/lobe-chat/issues/5876
+# refs: https://github.com/lobehub/lobehub/issues/5876
 ENV MIDDLEWARE_REWRITE_THROUGH_LOCAL="1"
 
 # set hostname to localhost
@@ -175,6 +184,7 @@ ENV KEY_VAULTS_SECRET="" \
 ENV AUTH_SECRET="" \
     AUTH_SSO_PROVIDERS="" \
     AUTH_ALLOWED_EMAILS="" \
+    AUTH_ADDITIONAL_TRUSTED_ORIGINS="" \
     AUTH_TRUSTED_ORIGINS="" \
     AUTH_DISABLE_EMAIL_PASSWORD="" \
     AUTH_EMAIL_VERIFICATION="" \
@@ -217,6 +227,14 @@ ENV NEXT_PUBLIC_S3_DOMAIN="" \
     S3_ENABLE_PATH_STYLE="" \
     S3_SET_ACL=""
 
+# Cloud Sandbox
+ENV SANDBOX_PROVIDER="" \
+    ONLYBOXES_BASE_URL="" \
+    ONLYBOXES_JIT_ISSUER="" \
+    ONLYBOXES_JIT_SIGNING_KEY="" \
+    ONLYBOXES_JIT_TTL_SEC="" \
+    ONLYBOXES_LEASE_TTL_SEC=""
+
 # Model Variables
 ENV \
     # AI21
@@ -224,9 +242,9 @@ ENV \
     # Ai360
     AI360_API_KEY="" AI360_MODEL_LIST="" \
     # AiHubMix
-    AIHUBMIX_API_KEY="" AIHUBMIX_MODEL_LIST="" \
+    AIHUBMIX_API_KEY="" AIHUBMIX_MODEL_LIST="" AIHUBMIX_PROXY_URL="" \
     # Anthropic
-    ANTHROPIC_API_KEY="" ANTHROPIC_MODEL_LIST="" ANTHROPIC_PROXY_URL="" \
+    ANTHROPIC_API_KEY="" ANTHROPIC_CLIENT_TIMEOUT="" ANTHROPIC_MODEL_LIST="" ANTHROPIC_PROXY_URL="" \
     # Amazon Bedrock
     ENABLED_AWS_BEDROCK="" AWS_ACCESS_KEY_ID="" AWS_SECRET_ACCESS_KEY="" AWS_REGION="" AWS_BEDROCK_MODEL_LIST="" \
     # Azure OpenAI
@@ -296,6 +314,8 @@ ENV \
     QWEN_API_KEY="" QWEN_MODEL_LIST="" QWEN_PROXY_URL="" \
     # SambaNova
     SAMBANOVA_API_KEY="" SAMBANOVA_MODEL_LIST="" \
+    # Meta
+    META_API_KEY="" META_MODEL_LIST="" META_PROXY_URL="" \
     # Search1API
     SEARCH1API_API_KEY="" SEARCH1API_MODEL_LIST="" \
     # SenseNova
@@ -310,6 +330,8 @@ ENV \
     TAICHU_API_KEY="" TAICHU_MODEL_LIST="" \
     # TogetherAI
     TOGETHERAI_API_KEY="" TOGETHERAI_MODEL_LIST="" \
+    # Unsloth
+    UNSLOTH_API_KEY="" UNSLOTH_MODEL_LIST="" UNSLOTH_PROXY_URL="" \
     # Upstage
     UPSTAGE_API_KEY="" UPSTAGE_MODEL_LIST="" \
     # v0 (Vercel)

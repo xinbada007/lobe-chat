@@ -1,12 +1,9 @@
 'use client';
 
-import { HotkeyEnum, type IEditor, INSERT_HEADING_COMMAND, getHotkeyById } from '@lobehub/editor';
-import {
-  ChatInputActions,
-  type ChatInputActionsProps,
-  type EditorState,
-  FloatActions,
-} from '@lobehub/editor/react';
+import { type IEditor } from '@lobehub/editor';
+import { getHotkeyById, HotkeyEnum, INSERT_HEADING_COMMAND } from '@lobehub/editor';
+import { type ChatInputActionsProps, type EditorState } from '@lobehub/editor/react';
+import { ChatInputActions, FloatActions } from '@lobehub/editor/react';
 import { Block } from '@lobehub/ui';
 import { cssVar } from 'antd-style';
 import {
@@ -28,7 +25,8 @@ import {
   UnderlineIcon,
   Undo2Icon,
 } from 'lucide-react';
-import { type CSSProperties, memo, useMemo } from 'react';
+import { type CSSProperties } from 'react';
+import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
 export interface InlineToolbarProps {
@@ -40,15 +38,23 @@ export interface InlineToolbarProps {
    */
   extraItems?: ChatInputActionsProps['items'];
   floating?: boolean;
+  /**
+   * Show only `extraItems` — no formatting controls. For a read-only body,
+   * where a selection can still be acted on (commented, asked about) but must
+   * never be formatted, since those commands would edit content that never
+   * saves.
+   */
+  selectionOnly?: boolean;
   style?: CSSProperties;
 }
 
 const InlineToolbar = memo<InlineToolbarProps>(
-  ({ floating, style, className, editor, editorState, extraItems }) => {
+  ({ floating, style, className, editor, editorState, extraItems, selectionOnly }) => {
     const { t } = useTranslation('editor');
 
     const items: ChatInputActionsProps['items'] = useMemo(() => {
       if (!editorState) return [];
+      if (selectionOnly) return extraItems ?? [];
 
       const baseItems = [
         // Extra items (like "Ask Copilot") come first
@@ -204,7 +210,7 @@ const InlineToolbar = memo<InlineToolbarProps>(
       ];
 
       return baseItems.filter(Boolean) as ChatInputActionsProps['items'];
-    }, [editor, editorState, extraItems, floating, t]);
+    }, [editor, editorState, extraItems, floating, selectionOnly, t]);
 
     if (!editorState) return null;
 
@@ -214,9 +220,10 @@ const InlineToolbar = memo<InlineToolbarProps>(
     // Fixed toolbar - wrap in a styled container
     return (
       <Block
+        shadow
         className={className}
         padding={4}
-        shadow
+        variant={'outlined'}
         style={{
           background: cssVar.colorBgElevated,
           borderRadius: 8,
@@ -227,7 +234,6 @@ const InlineToolbar = memo<InlineToolbarProps>(
           zIndex: 10,
           ...style,
         }}
-        variant={'outlined'}
       >
         <ChatInputActions items={items} />
       </Block>

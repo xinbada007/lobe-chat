@@ -1,4 +1,5 @@
-import { Flexbox, Tag, Text, Tooltip } from '@lobehub/ui';
+import { Flexbox, Tooltip } from '@lobehub/ui';
+import { Tag, Text } from '@lobehub/ui/base-ui';
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -16,7 +17,7 @@ const TitleExtra = memo<TitleExtraProps>(({ category, score, highlight, engines 
   const { t } = useTranslation('tool');
 
   return (
-    <Flexbox align={'center'} gap={4} horizontal>
+    <Flexbox horizontal align={'center'} gap={4}>
       <EngineAvatarGroup engines={engines} />
       {typeof score === 'number' && (
         <Tooltip title={t(highlight ? 'search.includedTooltip' : 'search.scoreTooltip')}>

@@ -25,6 +25,12 @@ Desktop.ini
 *.code-workspace
 .vscode/sessions.json
 prd
+# Recordings
+.records/
+
+# Agent-gateway probe captures (local debugging dumps)
+.agent-gateway/
+
 # Temporary files
 .temp/
 temp/
@@ -52,6 +58,11 @@ bun.lockb
 
 # Build outputs
 dist/
+public/_spa/
+public/_spa-auth/
+public/_spa-share/
+public/_spa-workbench/
+public/spa/
 es/
 lib/
 .next/
@@ -83,20 +94,25 @@ public/sw*
 public/swe-worker*
 
 # Generated files
+src/app/spa/[variants]/[[...path]]/spaHtmlTemplates.ts
+src/app/spa-auth/authHtmlTemplate.ts
+src/app/spa-share/shareHtmlTemplate.ts
+src/app/spa-workbench/workbenchHtmlTemplate.ts
 public/*.js
-public/sitemap.xml
-public/sitemap-index.xml
-sitemap*.xml
 robots.txt
 
 # Git hooks
-.husky/prepare-commit-msg
+.githooks/prepare-commit-msg
 
 # Documents and media
 *.pdf
 
 # Cloud service keys
 vertex-ai-key.json
+
+# Agent tracing snapshots
+.agent-tracing/
+.llm-generation-tracing/
 
 # AI coding tools
 .local/
@@ -108,7 +124,11 @@ CLAUDE.local.md
 # MCP tools
 .serena/**
 
+# Docker development data
+docker-compose/dev/data/
+
 # Migration scripts data
+.elasticsearch-reindex/
 scripts/clerk-to-betterauth/test/*.csv
 scripts/clerk-to-betterauth/test/*.json
 scripts/clerk-to-betterauth/prod/*.csv
@@ -123,5 +143,37 @@ e2e/reports
 out
 i18n-unused-keys-report.json
 .vitest-reports
+.vitest/
 
 pnpm-lock.yaml
+!apps/desktop/pnpm-lock.yaml
+.turbo
+spaHtmlTemplates.ts
+
+# Embedded CLI bundle (built at pack time)
+apps/desktop/resources/bin/lobe-cli.js
+apps/desktop/resources/cli-package.json
+
+# Superpowers plugin brainstorm/spec outputs (local only; do not commit)
+.superpowers/
+docs/superpowers/
+.heerogeneous-tracing
+
+# Kagura agent runtime
+.kagura/
+
+# AUV computer-use runtime: run records plus captured screenshots, written
+# relative to whatever directory the CLI was invoked from, so this can appear
+# at the repo root or inside an app.
+.auv/
+
+# Amp agent runtime
+.amp/
+
+# synthesized by plugins/vite/completionSounds.ts
+public/sounds/
+apps/desktop/resources/sounds/
+
+# alint: local provider setup (holds the API key) and result cache
+.alint/
+.alintcache

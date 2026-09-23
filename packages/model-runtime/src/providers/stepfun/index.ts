@@ -1,10 +1,9 @@
 import type { ChatModelCard } from '@lobechat/types';
 import { ModelProvider } from 'model-bank';
 
-import {
-  OpenAICompatibleFactoryOptions,
-  createOpenAICompatibleRuntime,
-} from '../../core/openaiCompatibleFactory';
+import type { OpenAICompatibleFactoryOptions } from '../../core/openaiCompatibleFactory';
+import { createOpenAICompatibleRuntime } from '../../core/openaiCompatibleFactory';
+import { createStepfunImage } from './createImage';
 
 export interface StepfunModelCard {
   id: string;
@@ -14,7 +13,7 @@ export const params = {
   baseURL: 'https://api.stepfun.com/v1',
   chatCompletion: {
     handlePayload: (payload) => {
-      const { enabledSearch, tools, ...rest } = payload;
+      const { enabledSearch, stream, tools, ...rest } = payload;
 
       const stepfunTools = enabledSearch
         ? [
@@ -30,7 +29,7 @@ export const params = {
 
       return {
         ...rest,
-        stream: !stepfunTools,
+        stream: stream ?? true,
         tools: stepfunTools,
       } as any;
     },
@@ -38,6 +37,7 @@ export const params = {
   debug: {
     chatCompletion: () => process.env.DEBUG_STEPFUN_CHAT_COMPLETION === '1',
   },
+  createImage: createStepfunImage,
   models: async ({ client }) => {
     const { LOBE_DEFAULT_MODEL_LIST } = await import('model-bank');
 

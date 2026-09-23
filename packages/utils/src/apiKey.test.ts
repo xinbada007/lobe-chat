@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { generateApiKey, isApiKeyExpired, validateApiKeyFormat } from './apiKey';
+import { API_KEY_PREFIX, generateApiKey, isApiKeyExpired, validateApiKeyFormat } from './apiKey';
 
 describe('apiKey', () => {
   describe('generateApiKey', () => {
     it('should generate API key with correct format', () => {
       const apiKey = generateApiKey();
-      expect(apiKey).toMatch(/^lb-[\da-z]{16}$/);
+      expect(apiKey.startsWith(API_KEY_PREFIX)).toBe(true);
+      expect(apiKey.slice(API_KEY_PREFIX.length)).toMatch(/^[\da-z]{16}$/);
     });
 
     it('should generate API key with correct length', () => {
       const apiKey = generateApiKey();
-      expect(apiKey).toHaveLength(19); // 'lb-' (3) + 16 characters
+      expect(apiKey).toHaveLength(API_KEY_PREFIX.length + 16);
     });
 
     it('should generate unique API keys', () => {
@@ -25,12 +26,12 @@ describe('apiKey', () => {
 
     it('should start with lb- prefix', () => {
       const apiKey = generateApiKey();
-      expect(apiKey.startsWith('lb-')).toBe(true);
+      expect(apiKey.startsWith(API_KEY_PREFIX)).toBe(true);
     });
 
     it('should only contain lowercase alphanumeric characters after prefix', () => {
       const apiKey = generateApiKey();
-      const randomPart = apiKey.slice(3); // Remove 'lb-' prefix
+      const randomPart = apiKey.slice(API_KEY_PREFIX.length);
       expect(randomPart).toMatch(/^[\da-z]+$/);
     });
   });
@@ -67,52 +68,52 @@ describe('apiKey', () => {
 
   describe('validateApiKeyFormat', () => {
     it('should validate correct API key format', () => {
-      const validKey = 'lb-1234567890abcdef';
+      const validKey = `${API_KEY_PREFIX}1234567890abcdef`;
       expect(validateApiKeyFormat(validKey)).toBe(true);
     });
 
     it('should accept keys with only numbers', () => {
-      const validKey = 'lb-1234567890123456';
+      const validKey = `${API_KEY_PREFIX}1234567890123456`;
       expect(validateApiKeyFormat(validKey)).toBe(true);
     });
 
     it('should accept keys with only lowercase letters', () => {
-      const validKey = 'lb-abcdefabcdefabcd';
+      const validKey = `${API_KEY_PREFIX}abcdefabcdefabcd`;
       expect(validateApiKeyFormat(validKey)).toBe(true);
     });
 
     it('should accept keys with mixed alphanumeric characters', () => {
-      const validKey = 'lb-abc123def456789a';
+      const validKey = `${API_KEY_PREFIX}abc123def456789a`;
       expect(validateApiKeyFormat(validKey)).toBe(true);
     });
 
-    it('should reject keys without lb- prefix', () => {
+    it('should reject keys without the configured prefix', () => {
       const invalidKey = '1234567890abcdef';
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should reject keys with wrong prefix', () => {
-      const invalidKey = 'lc-1234567890abcdef';
+      const invalidKey = 'lb-1234567890abcdef';
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should reject keys that are too short', () => {
-      const invalidKey = 'lb-123456789abcde';
+      const invalidKey = `${API_KEY_PREFIX}123456789abcde`;
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should reject keys that are too long', () => {
-      const invalidKey = 'lb-1234567890abcdef0';
+      const invalidKey = `${API_KEY_PREFIX}1234567890abcdef0`;
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should reject keys with uppercase letters', () => {
-      const invalidKey = 'lb-1234567890ABCDEF';
+      const invalidKey = `${API_KEY_PREFIX}1234567890ABCDEF`;
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should reject keys with special characters', () => {
-      const invalidKey = 'lb-1234567890abcd-f';
+      const invalidKey = `${API_KEY_PREFIX}1234567890abcd-f`;
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
@@ -121,19 +122,13 @@ describe('apiKey', () => {
     });
 
     it('should reject keys with spaces', () => {
-      const invalidKey = 'lb-1234567890abcd f';
+      const invalidKey = `${API_KEY_PREFIX}1234567890abcd f`;
       expect(validateApiKeyFormat(invalidKey)).toBe(false);
     });
 
     it('should validate generated keys', () => {
-      // Generate a key and validate it
       const generatedKey = generateApiKey();
-      // Note: The validation pattern expects hex digits (0-9a-f), but generated keys use base36 (0-9a-z)
-      // This test will fail if there are non-hex characters (g-z) in the generated key
-      const hasOnlyHexChars = /^lb-[\da-f]{16}$/.test(generatedKey);
-      if (hasOnlyHexChars) {
-        expect(validateApiKeyFormat(generatedKey)).toBe(true);
-      }
+      expect(validateApiKeyFormat(generatedKey)).toBe(true);
     });
   });
 });

@@ -1,4 +1,4 @@
-import { UIChatMessage } from '@lobechat/types';
+import { type UIChatMessage } from '@lobechat/types';
 import { describe, expect, it } from 'vitest';
 
 import { LOADING_FLAT } from '@/const/message';
@@ -174,5 +174,41 @@ describe('generateMarkdown', () => {
     });
 
     expect(result).toContain('**Bold** *Italic* `Code`');
+  });
+
+  it('should normalize a leading think tag before exporting markdown', () => {
+    const messagesWithThinkTags = [
+      {
+        id: '1',
+        content: '<think>Reasoning</think>Outro',
+        role: 'assistant',
+        createdAt: Date.now(),
+      },
+    ] as UIChatMessage[];
+
+    const result = generateMarkdown({
+      ...defaultParams,
+      messages: messagesWithThinkTags,
+    });
+
+    expect(result).toContain('<think>\n\nReasoning\n\n</think>\n\nOutro');
+  });
+
+  it('should keep a mid-message think tag untouched when exporting markdown', () => {
+    const messagesWithThinkTags = [
+      {
+        id: '1',
+        content: 'Intro<think>Reasoning</think>Outro',
+        role: 'assistant',
+        createdAt: Date.now(),
+      },
+    ] as UIChatMessage[];
+
+    const result = generateMarkdown({
+      ...defaultParams,
+      messages: messagesWithThinkTags,
+    });
+
+    expect(result).toContain('Intro<think>Reasoning</think>Outro');
   });
 });

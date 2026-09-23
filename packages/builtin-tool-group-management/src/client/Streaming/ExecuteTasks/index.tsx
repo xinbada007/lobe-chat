@@ -2,7 +2,8 @@
 
 import { DEFAULT_AVATAR } from '@lobechat/const';
 import type { AgentGroupMember, BuiltinStreamingProps } from '@lobechat/types';
-import { Avatar, Flexbox, Markdown } from '@lobehub/ui';
+import { Flexbox, Markdown } from '@lobehub/ui';
+import { Avatar } from '@lobehub/ui/base-ui';
 import { createStaticStyles, useTheme } from 'antd-style';
 import { memo, useMemo } from 'react';
 
@@ -59,7 +60,7 @@ export const ExecuteTasksStreaming = memo<BuiltinStreamingProps<ExecuteTasksPara
       {tasksWithAgents.map((task, index) => (
         <div className={styles.taskCard} key={task.agentId || index}>
           <Flexbox gap={8}>
-            <Flexbox align={'center'} gap={8} horizontal>
+            <Flexbox horizontal align={'center'} gap={8}>
               <Avatar
                 avatar={task.agent?.avatar || DEFAULT_AVATAR}
                 background={task.agent?.backgroundColor || theme.colorBgContainer}

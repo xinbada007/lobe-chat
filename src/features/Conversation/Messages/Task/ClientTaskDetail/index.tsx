@@ -1,6 +1,7 @@
 'use client';
 
-import { type TaskDetail, ThreadStatus } from '@lobechat/types';
+import { type TaskDetail } from '@lobechat/types';
+import { ThreadStatus } from '@lobechat/types';
 import { memo, useMemo } from 'react';
 
 import BubblesLoading from '@/components/BubblesLoading';
@@ -53,7 +54,7 @@ const ClientTaskDetail = memo<ClientTaskDetailProps>(
     );
 
     // Fetch thread messages (skip when executing - messages come from real-time updates)
-    useFetchMessages(threadContext, isExecuting);
+    useFetchMessages(threadContext, { skipFetch: isExecuting });
 
     // Get thread messages from store using selector
     const threadMessages = useChatStore((s) =>

@@ -7,9 +7,8 @@ permissions:
 
 on:
   push:
-    branches:
-      - main
-      - next
+    tags:
+      - 'v*.*.*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +17,7 @@ concurrency:
 jobs:
   release:
     name: Release
+    if: ${{ !contains(github.ref_name, '-') }}
     runs-on: ubuntu-latest
 
     services:
@@ -28,27 +28,26 @@ jobs:
         options: >-
           --health-cmd pg_isready --health-interval 10s --health-timeout 5s  --health-retries 5
 
+
         ports:
           - 5432:5432
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/create-github-app-token@v2
+        id: app-token
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          app-id: ${{ vars.LOBEHUB_BOT_APP_ID }}
+          private-key: ${{ secrets.LOBEHUB_BOT_APP_PRIVATE_KEY }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@v7
         with:
-          node-version: 24.11.1
-          package-manager-cache: false
+          token: ${{ steps.app-token.outputs.token }}
 
-      - name: Install bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
 
       - name: Install deps
-        run: bun i
+        run: pnpm install
 
       - name: Lint
         run: bun run lint
@@ -65,12 +64,6 @@ jobs:
       - name: Test App
         run: bun run test-app
 
-      - name: Release
-        run: bun run release
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Workflow
         run: bun run workflow:readme
 
@@ -83,4 +76,4 @@ jobs:
           git commit -m "📝 docs(bot): Auto sync agents & plugin to readme" || exit 0
           git push
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}

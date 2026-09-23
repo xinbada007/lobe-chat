@@ -1,6 +1,7 @@
 'use client';
 
-import { type ReactNode, useEffect } from 'react';
+import { type ReactNode } from 'react';
+import { useEffect } from 'react';
 
 interface DebugNodeProps {
   children?: ReactNode;
@@ -8,11 +9,10 @@ interface DebugNodeProps {
 }
 
 const DebugNode = ({ children, trace }: DebugNodeProps) => {
-  if (process.env.NODE_ENV !== 'development') return null;
+  if (!__DEV__) return null;
   // eslint-disable-next-line react-hooks/rules-of-hooks
   useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.log(`[DebugNode] Suspense fallback active: ${trace}`);
+    console.info(`[DebugNode] Suspense fallback active: ${trace}`);
   }, [trace]);
 
   return children ?? null;

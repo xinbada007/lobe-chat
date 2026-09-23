@@ -43,12 +43,25 @@ export interface ExtractorOptions extends ExtractorTemplateProps {
     ) => Promise<void> | void;
   };
   messageIds?: string[];
+  /**
+   * S3 key of the parent memory job trace. When provided, propagated into
+   * the per-call `llm_generation_tracing` row as `metadata.parent_memory_trace_key`,
+   * giving offline analysis a backlink from a single generateObject call to the
+   * job-level memory trace that spawned it.
+   */
+  parentMemoryTraceKey?: string;
   sourceId?: string;
+  /** Stable ID shared by calls in an extraction task without a chat topic. */
+  taskId?: string;
+  /** Topic identity for extraction scoped to one chat topic. Leave unset for cross-topic sources. */
+  topicId?: string;
   userId?: string;
 }
 
 export interface ExtractorTemplateProps {
   availableCategories?: string[];
+  availableLabels?: string[];
+  availableTags?: string[];
   language?: string;
   retrievedContexts?: string[];
   retrievedIdentitiesContext?: string;
@@ -61,8 +74,10 @@ export interface GatekeeperTemplateProps extends ExtractorTemplateProps {
   gateKeeperLanguage?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export type GatekeeperOptions = Pick<ExtractorOptions, 'retrievedContexts' | 'topK'> & {
+export type GatekeeperOptions = Pick<
+  ExtractorOptions,
+  'retrievedContexts' | 'taskId' | 'topicId' | 'topK'
+> & {
   additionalMessages?: OpenAIChatMessage[];
   callbacks?: ExtractorOptions['callbacks'];
   gateKeeperLanguage?: string;
@@ -99,7 +114,6 @@ export interface MemoryExtractionSourceMetadata {
   version?: string;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
 export type ContextOptions<P extends Record<string, unknown>> = P;
 
 export interface BuiltContext<T = Record<string, unknown>> {
@@ -113,12 +127,12 @@ export interface MemoryContextProvider<
   P extends Record<string, unknown> = Record<string, unknown>,
   R extends Record<string, unknown> = Record<string, unknown>,
 > {
-  buildContext(userId: string, sourceId: string, options?: P): Promise<BuiltContext<R>>;
+  buildContext: (userId: string, sourceId: string, options?: P) => Promise<BuiltContext<R>>;
 }
 
 export interface MemoryResultRecorder<T = Record<string, unknown>> {
-  recordComplete(job: MemoryExtractionJob, result: PersistedMemoryResult & T): Promise<void>;
-  recordFail?(job: MemoryExtractionJob, error: Error): Promise<void>;
+  recordComplete: (job: MemoryExtractionJob, result: PersistedMemoryResult & T) => Promise<void>;
+  recordFail?: (job: MemoryExtractionJob, error: Error) => Promise<void>;
 }
 
 export interface PersistedMemoryResult {

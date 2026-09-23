@@ -1,15 +1,11 @@
 // @vitest-environment node
 import { RelationshipEnum } from '@lobechat/types';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../../core/getTestDB';
-import {
-  NewUserMemoryIdentity,
-  userMemories,
-  userMemoriesIdentities,
-  users,
-} from '../../../schemas';
-import { LobeChatDatabase } from '../../../type';
+import type { NewUserMemoryIdentity } from '../../../schemas';
+import { userMemories, userMemoriesIdentities, users } from '../../../schemas';
+import type { LobeChatDatabase } from '../../../type';
 import { UserMemoryIdentityModel } from '../identity';
 
 const userId = 'identity-test-user';
@@ -455,7 +451,39 @@ describe('UserMemoryIdentityModel', () => {
       expect(result.pageSize).toBe(100);
     });
 
-    it('should search by query in title', async () => {
+    it('hydrates external candidates through the default self relationship filter', async () => {
+      const ftsSearchCandidates = vi.fn().mockResolvedValue({
+        candidates: [
+          { id: 'other-list-id', score: 12 },
+          { id: 'deleted-list-id', score: 10 },
+          { id: 'list-id-3', score: 8 },
+          { id: 'list-id-2', score: 6 },
+        ],
+        total: 4,
+      });
+      const model = new UserMemoryIdentityModel(serverDB, userId, {
+        ftsSearchCandidateEnabled: true,
+        ftsSearchCandidates,
+      });
+
+      const result = await model.queryList({ q: 'candidate' });
+
+      expect(result.items.map(({ id }) => id)).toEqual(['list-id-2']);
+      expect(result.total).toBe(1);
+      expect(ftsSearchCandidates).toHaveBeenCalledWith({
+        entity: 'memoryIdentities',
+        filters: { memoryRelationships: [RelationshipEnum.Self] },
+        pagination: {},
+        query: {
+          fields: ['parent_title', 'description', 'role'],
+          text: 'candidate',
+        },
+      });
+    });
+
+    // BM25 search requires pg_search extension (ParadeDB), not available in PGlite
+    const isServerDB = process.env.TEST_SERVER_DB === '1';
+    it.skipIf(!isServerDB)('should search by query in title', async () => {
       const result = await identityModel.queryList({
         q: 'Searchable Title',
         relationships: [RelationshipEnum.Self, RelationshipEnum.Friend],
@@ -465,14 +493,14 @@ describe('UserMemoryIdentityModel', () => {
       expect(result.items[0].id).toBe('list-id-3');
     });
 
-    it('should search by query in description', async () => {
+    it.skipIf(!isServerDB)('should search by query in description', async () => {
       const result = await identityModel.queryList({ q: 'Searchable description' });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe('list-id-2');
     });
 
-    it('should search by query in role', async () => {
+    it.skipIf(!isServerDB)('should search by query in role', async () => {
       const result = await identityModel.queryList({ q: 'Searchable role' });
 
       expect(result.items).toHaveLength(1);

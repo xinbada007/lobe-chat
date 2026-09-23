@@ -1,5 +1,6 @@
-import { type BuiltinPlaceholderProps, type SearchQuery } from '@lobechat/types';
-import { Flexbox, Icon, Skeleton } from '@lobehub/ui';
+import type { BuiltinPlaceholderProps, SearchQuery } from '@lobechat/types';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { Skeleton } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { SearchIcon } from 'lucide-react';
 import { memo } from 'react';
@@ -41,20 +42,16 @@ export const Search = memo<BuiltinPlaceholderProps<SearchQuery>>(({ args }) => {
         height={isMobile ? undefined : 32}
         horizontal={!isMobile}
       >
-        <Flexbox align={'center'} className={styles.query} gap={8} horizontal>
+        <Flexbox horizontal align={'center'} className={styles.query} gap={8}>
           <Icon icon={SearchIcon} />
-          {query ? query : <Skeleton.Block active style={{ height: 20, width: 40 }} />}
+          {query ? query : <Skeleton height={20} width={40} />}
         </Flexbox>
 
-        <Skeleton.Block active style={{ height: 20, width: 40 }} />
+        <Skeleton height={20} width={40} />
       </Flexbox>
-      <Flexbox gap={12} horizontal>
+      <Flexbox horizontal gap={12}>
         {['1', '2', '3', '4', '5'].map((id) => (
-          <Skeleton.Button
-            active
-            key={id}
-            style={{ borderRadius: 8, height: ITEM_HEIGHT, width: ITEM_WIDTH }}
-          />
+          <Skeleton height={ITEM_HEIGHT} key={id} radius={8} width={ITEM_WIDTH} />
         ))}
       </Flexbox>
     </Flexbox>

@@ -1,6 +1,7 @@
 'use client';
 
-import { Button, Flexbox, Icon } from '@lobehub/ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { Button } from '@lobehub/ui/base-ui';
 import { createStaticStyles, useTheme } from 'antd-style';
 import { TriangleAlert, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -55,7 +56,7 @@ const styles = createStaticStyles(({ css, cssVar }) => ({
 
     max-width: 480px;
     padding: 24px;
-    border: 1px solid var(--content-yellow-border, ${cssVar.colorWarningBorder});
+    border: 1px solid ${cssVar.colorFillQuaternary};
     border-radius: ${cssVar.borderRadiusLG};
 
     background: ${cssVar.colorBgContainer};
@@ -87,7 +88,7 @@ const ServerVersionOutdatedAlert = () => {
   const { t } = useTranslation('common');
   const [dismissed, setDismissed] = useState(false);
   const isServerVersionOutdated = useGlobalStore((s) => s.isServerVersionOutdated);
-  const storageMode = useElectronStore(electronSyncSelectors.storageMode);
+  const isOfficialServer = useElectronStore(electronSyncSelectors.isOfficialServer);
 
   const cssVariables = useMemo<Record<string, string>>(
     () => ({
@@ -97,9 +98,7 @@ const ServerVersionOutdatedAlert = () => {
     [theme.yellowBorder, theme.yellowBg],
   );
 
-  // Only show alert when using self-hosted server, not cloud
-  if (storageMode !== 'selfHost') return null;
-  if (!isServerVersionOutdated || dismissed) return null;
+  if (isOfficialServer || !isServerVersionOutdated || dismissed) return null;
 
   return (
     <div className={styles.container}>
@@ -109,7 +108,7 @@ const ServerVersionOutdatedAlert = () => {
         </div>
 
         <Flexbox gap={16}>
-          <Flexbox align="center" gap={8} horizontal>
+          <Flexbox horizontal align="center" gap={8}>
             <Icon className={styles.titleIcon} icon={TriangleAlert} />
             <div className={styles.title}>{t('serverVersionOutdated.title')}</div>
           </Flexbox>
@@ -120,13 +119,13 @@ const ServerVersionOutdatedAlert = () => {
 
           <div className={styles.warning}>{t('serverVersionOutdated.warning')}</div>
 
-          <Flexbox gap={8} horizontal justify="flex-end" style={{ marginTop: 8 }}>
+          <Flexbox horizontal gap={8} justify="flex-end" style={{ marginTop: 8 }}>
             <a href={MANUAL_UPGRADE_URL} rel="noreferrer" target="_blank">
               <Button size="small" type="primary">
                 {t('serverVersionOutdated.upgrade')}
               </Button>
             </a>
-            <Button onClick={() => setDismissed(true)} size="small">
+            <Button size="small" onClick={() => setDismissed(true)}>
               {t('serverVersionOutdated.dismiss')}
             </Button>
           </Flexbox>

@@ -1,5 +1,6 @@
-import { getPort } from 'get-port-please';
 import { createServer } from 'node:http';
+
+import { getPort } from 'get-port-please';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { App } from '../../App';
@@ -23,16 +24,6 @@ vi.mock('node:http', () => ({
   createServer: vi.fn((handler: any) => {
     mockServerHandler.current = handler;
     return mockServer;
-  }),
-}));
-
-// Mock logger
-vi.mock('@/utils/logger', () => ({
-  createLogger: () => ({
-    debug: vi.fn(),
-    error: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
   }),
 }));
 

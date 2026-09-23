@@ -37,6 +37,13 @@ LobeHub supports multimodal AI sessions, including the ability to upload unstruc
 - Default: -
 - Example: `https://cos.ap-chengdu.myqcloud.com`
 
+### `S3_INTERNAL_ENDPOINT`
+
+- Type: Optional
+- Description: Endpoint the LobeHub server uses for its own S3 requests (uploads, metadata checks, reads, bucket creation) when `S3_ENDPOINT` is only reachable from browsers, for example the Docker Compose service name. Presigned URLs keep using `S3_ENDPOINT`.
+- Default: `-` (uses `S3_ENDPOINT`)
+- Example: `http://rustfs:9000`
+
 ### `S3_BUCKET`
 
 - Type: Required
@@ -55,8 +62,8 @@ LobeHub supports multimodal AI sessions, including the ability to upload unstruc
 
 - Type: Optional
 - Description: Whether to set ACL to `public-read` when uploading files
-- Default: `1`
-- Example: `0`
+- Default: `-` (disabled; the ACL is only set when explicitly configured to `1`)
+- Example: `1`
 
 ### `S3_ENABLE_PATH_STYLE`
 
@@ -86,3 +93,12 @@ When set to `1`, LobeHub will convert images to base64 encoding before uploading
 ```log
 Route: [xai] ProviderBizError: Fetching images over plain http:// is not supported.
 ```
+
+### `LLM_VISION_VIDEO_USE_BASE64`
+
+- Type: Optional
+- Description: Set to `1` to use base64 encoding for video upload.
+- Default: undefined
+- Example: `1`
+
+When set to `1`, LobeHub will convert videos to base64 encoding before uploading them to the LLM model.

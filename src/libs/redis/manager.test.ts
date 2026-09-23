@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { RedisManager, initializeRedis, resetRedisClient } from './manager';
-import { RedisConfig } from './types';
+import { initializeRedis, RedisManager, resetRedisClient } from './manager';
+import { type RedisConfig } from './types';
 
 const { mockIoRedisInitialize, mockIoRedisDisconnect } = vi.hoisted(() => ({
   mockIoRedisInitialize: vi.fn().mockResolvedValue(undefined),
@@ -9,11 +9,13 @@ const { mockIoRedisInitialize, mockIoRedisDisconnect } = vi.hoisted(() => ({
 }));
 
 vi.mock('./redis', () => {
-  const IoRedisRedisProvider = vi.fn().mockImplementation((config) => ({
-    config,
-    initialize: mockIoRedisInitialize,
-    disconnect: mockIoRedisDisconnect,
-  }));
+  const IoRedisRedisProvider = vi.fn(function (config: unknown) {
+    return {
+      config,
+      initialize: mockIoRedisInitialize,
+      disconnect: mockIoRedisDisconnect,
+    };
+  });
 
   return { IoRedisRedisProvider };
 });

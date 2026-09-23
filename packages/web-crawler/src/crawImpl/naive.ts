@@ -1,8 +1,10 @@
 import { ssrfSafeFetch } from '@lobechat/ssrf-safe-fetch';
 
-import { CrawlImpl, CrawlSuccessResult } from '../type';
-import { NetworkConnectionError, PageNotFoundError, TimeoutError } from '../utils/errorType';
-import { htmlToMarkdown } from '../utils/htmlToMarkdown';
+import type { CrawlImpl, CrawlSuccessResult } from '../type';
+import { PageNotFoundError, toFetchError, UnsupportedContentError } from '../utils/errorType';
+import { htmlToMarkdown, MAX_HTML_SIZE } from '../utils/htmlToMarkdown';
+import { createHTTPStatusError } from '../utils/response';
+import { isNonDocumentContentType } from '../utils/urlPreflight';
 import { DEFAULT_TIMEOUT, withTimeout } from '../utils/withTimeout';
 
 const mixinHeaders = {
@@ -39,29 +41,36 @@ export const naive: CrawlImpl = async (url, { filterOptions }) => {
 
   try {
     res = await withTimeout(
-      ssrfSafeFetch(url, {
-        headers: mixinHeaders,
-        signal: new AbortController().signal,
-      }),
+      (signal) =>
+        ssrfSafeFetch(
+          url,
+          {
+            headers: mixinHeaders,
+            signal,
+          },
+          { maxContentLength: MAX_HTML_SIZE },
+        ),
       DEFAULT_TIMEOUT,
     );
   } catch (e) {
-    const error = e as Error;
-    if (error.message === 'fetch failed') {
-      throw new NetworkConnectionError();
-    }
-
-    if (error instanceof TimeoutError) {
-      throw error;
-    }
-
-    throw e;
+    throw toFetchError(e);
   }
 
-  if (res.status === 404) {
-    throw new PageNotFoundError(res.statusText);
+  if (res.status === 404 || res.status === 410) {
+    throw new PageNotFoundError(res.statusText, res.status);
   }
+
+  if (!res.ok) {
+    throw await createHTTPStatusError(res, 'Naive');
+  }
+
   const type = res.headers.get('content-type');
+
+  // images / fonts / media / archives have no readable body — surface that instead of
+  // handing binary bytes to the HTML parser (and falling through to the next provider)
+  if (isNonDocumentContentType(type)) {
+    throw new UnsupportedContentError(`URL points to non-document content (${type})`);
+  }
 
   if (type?.includes('application/json')) {
     let content: string;
@@ -74,7 +83,7 @@ export const naive: CrawlImpl = async (url, { filterOptions }) => {
     }
 
     return {
-      content: content,
+      content,
       contentType: 'json',
       length: content.length,
       url,
@@ -91,8 +100,8 @@ export const naive: CrawlImpl = async (url, { filterOptions }) => {
       return;
     }
 
-    // it's blocked by cloudflare
-    if (result.title !== 'Just a moment...') {
+    // It's blocked by Cloudflare.
+    if (result.title === 'Just a moment...') {
       return;
     }
 
@@ -107,7 +116,7 @@ export const naive: CrawlImpl = async (url, { filterOptions }) => {
       url,
     } satisfies CrawlSuccessResult;
   } catch (error) {
-    console.error(error);
+    console.error('[naive]', error);
   }
 
   return;

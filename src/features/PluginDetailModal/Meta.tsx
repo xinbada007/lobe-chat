@@ -1,4 +1,5 @@
-import { Block, Flexbox, Text } from '@lobehub/ui';
+import { Block, Flexbox } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import isEqual from 'fast-deep-equal';
 import { memo } from 'react';
 
@@ -12,7 +13,7 @@ const Meta = memo<{
   const pluginMeta = useToolStore(pluginSelectors.getPluginMetaById(id), isEqual);
 
   return (
-    <Block gap={16} horizontal padding={16} variant={'outlined'}>
+    <Block horizontal gap={16} padding={16} variant={'outlined'}>
       <PluginAvatar identifier={id} size={40} />
       <Flexbox gap={2}>
         <div>{pluginHelpers.getPluginTitle(pluginMeta)}</div>

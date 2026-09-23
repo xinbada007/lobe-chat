@@ -1,6 +1,7 @@
 'use client';
 
-import { AccordionItem, Block, Text } from '@lobehub/ui';
+import { Block } from '@lobehub/ui';
+import { Accordion, Text } from '@lobehub/ui/base-ui';
 import { memo, useMemo, useState } from 'react';
 
 import { useAgentGroupStore } from '@/store/agentGroup';
@@ -8,16 +9,17 @@ import { agentGroupSelectors } from '@/store/agentGroup/selectors';
 import { useChatStore } from '@/store/chat';
 import { displayMessageSelectors } from '@/store/chat/selectors';
 import { messageMapKey } from '@/store/chat/utils/messageMapKey';
+import { type UIChatMessage } from '@/types/index';
 import { ThreadStatus } from '@/types/index';
-import type { UIChatMessage } from '@/types/index';
 
 import {
   ErrorState,
   InitializingState,
-  TaskMessages,
   isProcessingStatus,
+  TaskMessages,
 } from '../../Tasks/shared';
-import TaskTitle, { type TaskMetrics } from './TaskTitle';
+import { type TaskMetrics } from './TaskTitle';
+import TaskTitle from './TaskTitle';
 
 interface ClientTaskItemProps {
   item: UIChatMessage;
@@ -75,7 +77,7 @@ const ClientTaskItem = memo<ClientTaskItemProps>(({ item }) => {
   );
 
   // Fetch thread messages (skip when executing - messages come from real-time updates)
-  useFetchMessages(threadContext, isProcessing);
+  useFetchMessages(threadContext, { skipFetch: isProcessing });
 
   // Get thread messages from store using selector
   const threadMessages = useChatStore((s) =>
@@ -99,7 +101,10 @@ const ClientTaskItem = memo<ClientTaskItemProps>(({ item }) => {
       const toolCalls = blocks.reduce((sum, block) => sum + (block.tools?.length || 0), 0);
       return {
         isLoading: false,
-        startTime: assistantGroupMessage?.createdAt,
+        // Anchor elapsed time to the task tool's createdAt (when the sub-agent was
+        // invoked) rather than the in-thread first assistant's createdAt (when the
+        // thread finished initializing) — the latter excludes init / approval wait.
+        startTime: item.createdAt,
         steps: blocks.length,
         toolCalls,
       };
@@ -117,7 +122,7 @@ const ClientTaskItem = memo<ClientTaskItemProps>(({ item }) => {
     isCompleted,
     isError,
     blocks,
-    assistantGroupMessage?.createdAt,
+    item.createdAt,
     taskDetail?.duration,
     taskDetail?.totalSteps,
     taskDetail?.totalToolCalls,
@@ -127,54 +132,60 @@ const ClientTaskItem = memo<ClientTaskItemProps>(({ item }) => {
   const hasBlocks = blocks && childrenCount > 0;
 
   return (
-    <AccordionItem
-      expand={expanded}
-      itemKey={id}
-      onExpandChange={setExpanded}
-      paddingBlock={4}
-      paddingInline={4}
-      title={
-        <TaskTitle
-          agent={
-            agent
-              ? { avatar: agent.avatar || undefined, backgroundColor: agent.backgroundColor }
-              : undefined
-          }
-          metrics={metrics}
-          status={status}
-          title={title}
-        />
-      }
-    >
-      <Block gap={16} padding={12} style={{ marginBlock: 8 }} variant={'outlined'}>
-        {instruction && (
-          <Block padding={12}>
-            <Text fontSize={13} type={'secondary'}>
-              {instruction}
-            </Text>
-          </Block>
-        )}
+    <Accordion
+      keepMounted
+      indicatorPlacement="inline"
+      styles={{ trigger: { paddingBlock: 4, paddingInline: 4 } }}
+      value={expanded ? [id] : []}
+      items={[
+        {
+          children: (
+            <Block gap={16} padding={12} style={{ marginBlock: 8 }} variant={'outlined'}>
+              {instruction && (
+                <Block padding={12}>
+                  <Text fontSize={13} type={'secondary'}>
+                    {instruction}
+                  </Text>
+                </Block>
+              )}
 
-        {/* Initializing State - no taskDetail yet or no blocks */}
-        {(isInitializing || (isProcessing && !hasBlocks)) && <InitializingState />}
+              {/* Initializing State - no taskDetail yet or no blocks */}
+              {(isInitializing || (isProcessing && !hasBlocks)) && <InitializingState />}
 
-        {/* Processing or Completed State - show blocks via TaskMessages */}
-        {!isInitializing && (isProcessing || isCompleted) && hasBlocks && threadMessages && (
-          <TaskMessages
-            duration={taskDetail?.duration}
-            isProcessing={isProcessing}
-            messages={threadMessages}
-            model={model ?? undefined}
-            provider={provider ?? undefined}
-            startTime={assistantGroupMessage?.createdAt}
-            totalCost={taskDetail?.totalCost}
-          />
-        )}
+              {/* Processing or Completed State - show blocks via TaskMessages */}
+              {!isInitializing && (isProcessing || isCompleted) && hasBlocks && threadMessages && (
+                <TaskMessages
+                  duration={taskDetail?.duration}
+                  isProcessing={isProcessing}
+                  messages={threadMessages}
+                  model={model ?? undefined}
+                  provider={provider ?? undefined}
+                  startTime={item.createdAt}
+                  totalCost={taskDetail?.totalCost}
+                />
+              )}
 
-        {/* Error State */}
-        {!isInitializing && isError && taskDetail && <ErrorState taskDetail={taskDetail} />}
-      </Block>
-    </AccordionItem>
+              {/* Error State */}
+              {!isInitializing && isError && taskDetail && <ErrorState taskDetail={taskDetail} />}
+            </Block>
+          ),
+          key: id,
+          title: (
+            <TaskTitle
+              metrics={metrics}
+              status={status}
+              title={title}
+              agent={
+                agent
+                  ? { avatar: agent.avatar || undefined, backgroundColor: agent.backgroundColor }
+                  : undefined
+              }
+            />
+          ),
+        },
+      ]}
+      onValueChange={(value) => setExpanded(value.includes(id))}
+    />
   );
 }, Object.is);
 

@@ -1,4 +1,5 @@
-import { Block, Flexbox, Icon, Skeleton, Text } from '@lobehub/ui';
+import { Block, Flexbox, Icon } from '@lobehub/ui';
+import { Skeleton, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cx } from 'antd-style';
 import { SearchIcon } from 'lucide-react';
 import { memo } from 'react';
@@ -37,24 +38,24 @@ const SearchBar = memo<SearchBarProps>(
         horizontal={!isMobile}
       >
         <Block
-          align={'center'}
-          className={cx(styles.query, searching && shinyTextStyles.shinyText)}
           clickable
-          gap={8}
           horizontal
+          align={'center'}
+          className={styles.query}
+          gap={8}
+          variant={'borderless'}
           onClick={() => {
             onEditingChange(true);
           }}
-          variant={'borderless'}
         >
           <Icon icon={SearchIcon} />
-          {defaultQuery}
+          <span className={cx(searching && shinyTextStyles.shinyText)}>{defaultQuery}</span>
         </Block>
 
         {searching ? (
-          <Skeleton.Block active style={{ height: 20, width: 40 }} />
+          <Skeleton height={20} width={40} />
         ) : (
-          <Flexbox align={'center'} gap={4} horizontal>
+          <Flexbox horizontal align={'center'} gap={4}>
             <EngineAvatarGroup engines={defaultEngines} />
             {!isMobile && (
               <Text style={{ fontSize: 12 }} type={'secondary'}>

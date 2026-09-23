@@ -1,33 +1,26 @@
 'use client';
 
 import { type AssistantContentBlock, type UIChatMessage } from '@lobechat/types';
-import {
-  Accordion,
-  AccordionItem,
-  Block,
-  Flexbox,
-  Icon,
-  Markdown,
-  ScrollShadow,
-  Text,
-} from '@lobehub/ui';
+import { Block, Flexbox, Icon, Markdown } from '@lobehub/ui';
+import { Accordion, Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar } from 'antd-style';
 import { ScrollText, Workflow } from 'lucide-react';
-import { type RefObject, memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import NeuralNetworkLoading from '@/components/NeuralNetworkLoading';
 import { useAutoScroll } from '@/hooks/useAutoScroll';
+import { useUserStore } from '@/store/user';
+import { userGeneralSettingsSelectors } from '@/store/user/selectors';
 
 import ContentBlock from '../../AssistantGroup/components/ContentBlock';
+import ContentBlocksScroll from '../../AssistantGroup/components/ContentBlocksScroll';
+import { resolveAssistantGroupFromMessages } from '../../AssistantGroup/utils/resolveAssistantGroupFromMessages';
 import Usage from '../../components/Extras/Usage';
 import AnimatedNumber from '../../components/Extras/Usage/UsageDetail/AnimatedNumber';
 import { accumulateUsage, formatDuration, formatElapsedTime } from './utils';
 
 const styles = createStaticStyles(({ css }) => ({
-  contentScroll: css`
-    max-height: min(50vh, 300px);
-  `,
   instructionContent: css`
     overflow: auto;
     max-height: 300px;
@@ -52,45 +45,47 @@ const InstructionAccordion = memo<{ childrenCount: number; instruction: string }
 
     return (
       <Accordion
-        expandedKeys={expandedKeys}
         gap={8}
-        onExpandedChange={(keys) => setExpandedKeys(keys as string[])}
-      >
-        <AccordionItem
-          itemKey="instruction"
-          paddingBlock={4}
-          paddingInline={4}
-          title={
-            <Flexbox align="center" gap={8} horizontal>
+        indicatorPlacement="inline"
+        styles={{ trigger: { paddingBlock: 4, paddingInline: 4 } }}
+        value={expandedKeys}
+        items={[
+          {
+            children: (
               <Block
-                align="center"
-                flex="none"
-                gap={4}
-                height={24}
-                horizontal
-                justify="center"
-                style={{ fontSize: 12 }}
-                variant="outlined"
-                width={24}
+                className={styles.instructionContent}
+                padding={12}
+                style={{ marginBlock: 8 }}
+                variant={'outlined'}
               >
-                <Icon color={cssVar.colorTextSecondary} icon={ScrollText} />
+                <Markdown variant={'chat'}>{instruction}</Markdown>
               </Block>
-              <Text as="span" type="secondary">
-                {t('task.instruction')}
-              </Text>
-            </Flexbox>
-          }
-        >
-          <Block
-            className={styles.instructionContent}
-            padding={12}
-            style={{ marginBlock: 8 }}
-            variant={'outlined'}
-          >
-            <Markdown variant={'chat'}>{instruction}</Markdown>
-          </Block>
-        </AccordionItem>
-      </Accordion>
+            ),
+            key: 'instruction',
+            title: (
+              <Flexbox horizontal align="center" gap={8}>
+                <Block
+                  horizontal
+                  align="center"
+                  flex="none"
+                  gap={4}
+                  height={24}
+                  justify="center"
+                  style={{ fontSize: 12 }}
+                  variant="outlined"
+                  width={24}
+                >
+                  <Icon color={cssVar.colorTextSecondary} icon={ScrollText} />
+                </Block>
+                <Text as="span" type="secondary">
+                  {t('task.instruction')}
+                </Text>
+              </Flexbox>
+            ),
+          },
+        ]}
+        onValueChange={setExpandedKeys}
+      />
     );
   },
 );
@@ -134,17 +129,17 @@ interface TaskMessagesProps {
  */
 const ProcessingView = memo<{
   accumulatedUsage: { cost?: number; totalTokens?: number };
-  assistantId: string;
-  blocks: AssistantContentBlock[];
+  messages: UIChatMessage[];
   model?: string;
   provider?: string;
   startTime?: number;
   totalToolCalls: number;
-}>(({ blocks, assistantId, startTime, model, provider, totalToolCalls, accumulatedUsage }) => {
+}>(({ messages, startTime, model, provider, totalToolCalls, accumulatedUsage }) => {
   const { t } = useTranslation('chat');
+  const isDevMode = useUserStore((s) => userGeneralSettingsSelectors.config(s).isDevMode);
   const [elapsedTime, setElapsedTime] = useState(0);
   const { ref, handleScroll } = useAutoScroll<HTMLDivElement>({
-    deps: [blocks],
+    deps: [messages],
     enabled: true,
   });
 
@@ -168,13 +163,13 @@ const ProcessingView = memo<{
 
   return (
     <Flexbox gap={8}>
-      <Flexbox align="center" gap={8} horizontal paddingInline={4}>
+      <Flexbox horizontal align="center" gap={8} paddingInline={4}>
         <Block
+          horizontal
           align="center"
           flex="none"
           gap={4}
           height={24}
-          horizontal
           justify="center"
           style={{ fontSize: 12 }}
           variant="outlined"
@@ -182,7 +177,7 @@ const ProcessingView = memo<{
         >
           <NeuralNetworkLoading size={16} />
         </Block>
-        <Flexbox align="center" gap={4} horizontal>
+        <Flexbox horizontal align="center" gap={4}>
           <Text as="span" type="secondary" weight={500}>
             <AnimatedNumber
               duration={500}
@@ -200,22 +195,18 @@ const ProcessingView = memo<{
           )}
         </Flexbox>
       </Flexbox>
-      <ScrollShadow
-        className={styles.contentScroll}
-        offset={12}
+      <ContentBlocksScroll
+        disableEditing
+        messages={messages}
+        scrollRef={ref}
+        variant="task"
         onScroll={handleScroll}
-        ref={ref as RefObject<HTMLDivElement>}
-        size={8}
-      >
-        <Flexbox gap={8}>
-          {blocks.map((block) => (
-            <ContentBlock {...block} assistantId={assistantId} disableEditing key={block.id} />
-          ))}
-        </Flexbox>
-      </ScrollShadow>
+      />
 
       {/* Usage display */}
-      {model && provider && <Usage model={model} provider={provider} usage={accumulatedUsage} />}
+      {isDevMode && model && provider && (
+        <Usage model={model} provider={provider} usage={accumulatedUsage} />
+      )}
     </Flexbox>
   );
 });
@@ -236,6 +227,7 @@ const CompletedView = memo<{
   totalToolCalls: number;
 }>(({ blocks, assistantId, duration, totalToolCalls, model, provider, totalTokens, totalCost }) => {
   const { t } = useTranslation('chat');
+  const isDevMode = useUserStore((s) => userGeneralSettingsSelectors.config(s).isDevMode);
 
   // Split blocks: intermediate steps (all but last) and final result (last)
   const { intermediateBlocks, finalBlock } = useMemo(() => {
@@ -251,13 +243,13 @@ const CompletedView = memo<{
   if (!finalBlock) return null;
 
   const title = (
-    <Flexbox align="center" gap={8} horizontal>
+    <Flexbox horizontal align="center" gap={8}>
       <Block
+        horizontal
         align="center"
         flex="none"
         gap={4}
         height={24}
-        horizontal
         justify="center"
         style={{ fontSize: 12 }}
         variant="outlined"
@@ -265,7 +257,7 @@ const CompletedView = memo<{
       >
         <Icon color={cssVar.colorTextSecondary} icon={Workflow} />
       </Block>
-      <Flexbox align="center" gap={4} horizontal>
+      <Flexbox horizontal align="center" gap={4}>
         <Text as="span" type="secondary" weight={500}>
           {totalToolCalls}
         </Text>
@@ -286,22 +278,37 @@ const CompletedView = memo<{
     <Flexbox gap={8}>
       {/* Intermediate steps - collapsed by default */}
       {intermediateBlocks.length > 0 && (
-        <Accordion defaultExpandedKeys={[]} gap={8}>
-          <AccordionItem itemKey="intermediate" paddingBlock={4} paddingInline={4} title={title}>
-            <Flexbox gap={8} paddingInline={4} style={{ marginTop: 8 }}>
-              {intermediateBlocks.map((block) => (
-                <ContentBlock {...block} assistantId={assistantId} disableEditing key={block.id} />
-              ))}
-            </Flexbox>
-          </AccordionItem>
-        </Accordion>
+        <Accordion
+          defaultValue={[]}
+          gap={8}
+          indicatorPlacement="inline"
+          styles={{ trigger: { paddingBlock: 4, paddingInline: 4 } }}
+          items={[
+            {
+              children: (
+                <Flexbox gap={8} paddingInline={4} style={{ marginTop: 8 }}>
+                  {intermediateBlocks.map((block) => (
+                    <ContentBlock
+                      {...block}
+                      disableEditing
+                      assistantId={assistantId}
+                      key={block.id}
+                    />
+                  ))}
+                </Flexbox>
+              ),
+              key: 'intermediate',
+              title,
+            },
+          ]}
+        />
       )}
 
       {/* Final result - always visible */}
-      <ContentBlock {...finalBlock} assistantId={assistantId} disableEditing />
+      <ContentBlock {...finalBlock} disableEditing assistantId={assistantId} />
 
       {/* Usage display */}
-      {model && provider && (
+      {isDevMode && model && provider && (
         <Usage model={model} provider={provider} usage={{ cost: totalCost, totalTokens }} />
       )}
     </Flexbox>
@@ -320,45 +327,10 @@ CompletedView.displayName = 'CompletedView';
 const TaskMessages = memo<TaskMessagesProps>(
   ({ messages, isProcessing = false, startTime, duration, model, provider, totalCost }) => {
     // Extract blocks and instruction from messages
-    const { blocks, assistantId, instruction } = useMemo(() => {
-      if (!messages || messages.length === 0)
-        return { assistantId: '', blocks: [], instruction: undefined };
-
-      const assistantGroupMessage = messages.find((item) => item.role === 'assistantGroup');
-      const userMessage = messages.find((item) => item.role === 'user');
-
-      // If assistantGroup exists, use its children as blocks
-      if (assistantGroupMessage) {
-        return {
-          assistantId: assistantGroupMessage.id ?? '',
-          blocks: assistantGroupMessage.children ?? [],
-          instruction: userMessage?.content,
-        };
-      }
-
-      // Fallback: support plain assistant message (without tools)
-      // This handles cases where SubAgent returns a simple text response
-      const assistantMessage = messages.find((item) => item.role === 'assistant');
-      if (assistantMessage) {
-        // Convert plain assistant message to block format
-        const block: AssistantContentBlock = {
-          content: assistantMessage.content || '',
-          id: assistantMessage.id,
-        };
-
-        // Copy optional fields if they exist
-        if (assistantMessage.error) block.error = assistantMessage.error;
-        if (assistantMessage.reasoning) block.reasoning = assistantMessage.reasoning;
-
-        return {
-          assistantId: assistantMessage.id ?? '',
-          blocks: [block],
-          instruction: userMessage?.content,
-        };
-      }
-
-      return { assistantId: '', blocks: [], instruction: undefined };
-    }, [messages]);
+    const { blocks, assistantId, instruction } = useMemo(
+      () => resolveAssistantGroupFromMessages(messages),
+      [messages],
+    );
 
     // Calculate total tool calls
     const totalToolCalls = useMemo(
@@ -380,8 +352,7 @@ const TaskMessages = memo<TaskMessagesProps>(
         {isProcessing ? (
           <ProcessingView
             accumulatedUsage={accumulatedUsage}
-            assistantId={assistantId}
-            blocks={blocks}
+            messages={messages}
             model={model}
             provider={provider}
             startTime={startTime}

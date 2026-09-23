@@ -1,14 +1,15 @@
-import { LobeChatPluginManifest } from '@lobehub/chat-plugin-sdk';
-import { PluginItem } from '@lobehub/market-sdk';
+import type * as LobechatConstModule from '@lobechat/const';
+import { type ToolManifest } from '@lobechat/types';
+import { type PluginItem } from '@lobehub/market-sdk';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { TRPCClientError } from '@trpc/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { discoverService } from '@/services/discover';
 import { mcpService } from '@/services/mcp';
 import { pluginService } from '@/services/plugin';
 import { globalHelpers } from '@/store/global/helpers';
-import { CheckMcpInstallResult, MCPInstallStep } from '@/types/plugins';
+import { type CheckMcpInstallResult } from '@/types/plugins';
+import { MCPInstallStep } from '@/types/plugins';
 
 import { useToolStore } from '../../store';
 
@@ -43,23 +44,18 @@ vi.mock('@/libs/trpc/client', () => ({
   },
 }));
 
-// Keep zustand mock as it's needed globally
-vi.mock('zustand/traditional');
-
 // Mock sleep to speed up tests
 vi.mock('@/utils/sleep', () => ({
   sleep: vi.fn().mockResolvedValue(undefined),
 }));
 
-const ORIGINAL_DESKTOP_ENV = process.env.NEXT_PUBLIC_IS_DESKTOP_APP;
+vi.mock('zustand/traditional');
 
 const bootstrapToolStoreWithDesktop = async (isDesktopEnv: boolean) => {
   vi.resetModules();
-  vi.mock('zustand/traditional');
-  process.env.NEXT_PUBLIC_IS_DESKTOP_APP = isDesktopEnv ? '1' : '0';
 
   vi.doMock('@lobechat/const', async () => {
-    const actual = await vi.importActual<typeof import('@lobechat/const')>('@lobechat/const');
+    const actual = await vi.importActual<typeof LobechatConstModule>('@lobechat/const');
     return {
       ...actual,
       isDesktop: isDesktopEnv,
@@ -73,12 +69,6 @@ const bootstrapToolStoreWithDesktop = async (isDesktopEnv: boolean) => {
   const cleanup = () => {
     vi.resetModules();
     vi.doUnmock('@lobechat/const');
-    vi.mock('zustand/traditional');
-    if (ORIGINAL_DESKTOP_ENV === undefined) {
-      delete process.env.NEXT_PUBLIC_IS_DESKTOP_APP;
-    } else {
-      process.env.NEXT_PUBLIC_IS_DESKTOP_APP = ORIGINAL_DESKTOP_ENV;
-    }
   };
 
   return {
@@ -125,11 +115,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
-  if (ORIGINAL_DESKTOP_ENV === undefined) {
-    delete process.env.NEXT_PUBLIC_IS_DESKTOP_APP;
-  } else {
-    process.env.NEXT_PUBLIC_IS_DESKTOP_APP = ORIGINAL_DESKTOP_ENV;
-  }
+  vi.resetModules();
 });
 
 describe('mcpStore actions', () => {
@@ -241,7 +227,7 @@ describe('mcpStore actions', () => {
   });
 
   describe('testMcpConnection', () => {
-    const mockManifest: LobeChatPluginManifest = {
+    const mockManifest: ToolManifest = {
       api: [],
       gateway: '',
       identifier: 'test-plugin',
@@ -728,7 +714,7 @@ describe('mcpStore actions', () => {
       },
     };
 
-    const mockServerManifest: LobeChatPluginManifest = {
+    const mockServerManifest: ToolManifest = {
       api: [],
       gateway: '',
       identifier: 'test-plugin',
@@ -1181,7 +1167,7 @@ describe('mcpStore actions', () => {
           version: '1.5.0',
         };
 
-        const serverManifestWithVersion: LobeChatPluginManifest = {
+        const serverManifestWithVersion: ToolManifest = {
           api: [],
           gateway: '',
           identifier: 'test-plugin',

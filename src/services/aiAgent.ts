@@ -1,18 +1,150 @@
+import type {
+  ExecAgentAppContext,
+  ExecAgentResult,
+  RuntimeMentionedAgent,
+  ScheduleAgentRunParams,
+  ScheduleAgentRunResult,
+  UserInterventionConfig,
+} from '@lobechat/types';
+
 import { lambdaClient } from '@/libs/trpc/client';
+
+export type { ExecAgentResult, ScheduleAgentRunParams, ScheduleAgentRunResult };
+
+/**
+ * Resume instruction for an operation that hit `human_approve_required`. When
+ * present, the new op acts as the "continue" step: server reads the target tool
+ * message, writes the user's decision, and either re-dispatches the tool
+ * (approved) or feeds the rejection back to the LLM as user feedback
+ * (rejected / rejected_continue).
+ *
+ * Kept as a top-level field (not folded into `appContext`) so the server schema
+ * can validate it independently.
+ */
+export interface ResumeApprovalParam {
+  decision: 'approved' | 'rejected' | 'rejected_continue';
+  /** ID of the pending `role='tool'` message this decision targets. */
+  parentMessageId: string;
+  /** Optional user-supplied rejection reason (only meaningful for rejected variants). */
+  rejectionReason?: string;
+  /** tool_call_id of the pending tool call being approved/rejected. */
+  toolCallId: string;
+}
+
+/**
+ * Resume instruction for an operation that paused on a `humanIntervention:
+ * 'always'` tool (e.g. lobe-agent `askUserQuestion`) during a GATEWAY/server
+ * run. When present, the new op writes the human-provided answer as the pending
+ * tool message's result and resumes from `phase: 'tool_result'` — the tool is
+ * NOT re-executed, so the server runtime never overwrites the answer with a
+ * fresh "pending" placeholder.
+ *
+ * Kept as a top-level field (not folded into `appContext`) so the server schema
+ * can validate it independently.
+ */
+export interface ResumeToolResultParam {
+  /** The human-provided tool result (the answer text). */
+  content: string;
+  /** Distinguishes a submitted form from an explicit skip. */
+  outcome?: 'skipped' | 'submitted';
+  /** ID of the pending `role='tool'` message this result targets. */
+  parentMessageId: string;
+  /** Optional plugin state to persist on the tool message. */
+  pluginState?: Record<string, unknown>;
+  /** Optional user-supplied reason for a skipped interaction. */
+  rejectionReason?: string;
+  /** tool_call_id of the pending tool call being answered. */
+  toolCallId: string;
+}
+
+export type AgentInterventionSourceAction =
+  | { optionId: string; type: 'select_provider_option' }
+  | {
+      edits?: Record<string, Record<string, unknown>>;
+      scope: 'once' | 'remember';
+      type: 'approve_tool';
+    }
+  | { reason?: string; type: 'reject_continue' }
+  | { scope: 'operation'; type: 'stop' }
+  | { result: Record<string, string | string[]>; type: 'submit_answers' }
+  | {
+      result: { kind: 'agent_marketplace'; selectedTemplateIds: string[] };
+      type: 'submit_custom';
+    }
+  | { type: 'skip_interaction' }
+  | { type: 'cancel_interaction' };
+
+export interface ResolveAgentInterventionBySourceParams {
+  action: AgentInterventionSourceAction;
+  batchId: string;
+  operationId: string;
+  resolutionRequestId: string;
+  targets: Array<{ toolCallId: string; toolMessageId: string }>;
+}
+
+export type ResolveAgentInterventionBySourceResult =
+  | { execution?: never; handled: false; state?: never }
+  | {
+      execution?: ExecAgentResult;
+      handled: true;
+      state: 'already_resolved' | 'claimed';
+    };
+
+export interface GetAgentInterventionReviewBySourceParams {
+  batchId: string;
+  operationId: string;
+  targets: Array<{ toolCallId: string; toolMessageId: string }>;
+}
 
 export interface ExecAgentTaskParams {
   agentId?: string;
-  appContext?: {
-    groupId?: string | null;
-    scope?: string | null;
-    sessionId?: string;
-    threadId?: string | null;
-    topicId?: string | null;
-  };
+  appContext?: ExecAgentAppContext;
   autoStart?: boolean;
+  /**
+   * Client-minted ids for the rows this run creates, honoured verbatim by the
+   * server — the gateway counterpart of `sendMessageInServer`'s
+   * `newTopic.id` / `newUserMessage.id` / `newAssistantMessage.id`. Fresh
+   * sends only; resume / regeneration must not replay them.
+   */
+  clientIds?: { assistantMessageId?: string; topicId?: string; userMessageId?: string };
+  deviceId?: string;
   existingMessageIds?: string[];
+  /** File IDs of already-uploaded attachments to attach to the new user message */
+  fileIds?: string[];
+  localDeviceId?: string;
+  /**
+   * Agents the user @-mentioned in this message (multi-mention). The server
+   * enables the callAgent tool and injects the mentioned-agents delegation
+   * context so the supervisor run delegates to them instead of answering itself.
+   */
+  mentionedAgents?: RuntimeMentionedAgent[];
+  /** Parent message ID for regeneration/continue (skip user message creation, branch from this message) */
+  parentMessageId?: string;
   prompt: string;
+  /** Existing gateway operation this fresh turn atomically supersedes. */
+  replacesOperationId?: string;
+  /** Resume a previous op paused on `human_approve_required` instead of starting from a fresh user prompt. */
+  resumeApproval?: ResumeApprovalParam;
+  /**
+   * Batch form of `resumeApproval` — one entry per pending tool resolved in a
+   * single "approve all" action. The server applies every decision, runs all
+   * approved tools as ONE `call_tools_batch`, and continues the LLM once.
+   */
+  resumeApprovals?: ResumeApprovalParam[];
+  /** Resume a previous op paused on a human-intervention tool by carrying the human answer as the tool result. */
+  resumeToolResult?: ResumeToolResultParam;
+  /** Tool identifiers the user @-mentioned in this message; the server enables them for this run. */
+  selectedToolIds?: string[];
   slug?: string;
+  /** The prompt was queued behind a running turn and renders as its continuation. */
+  steer?: boolean;
+  /**
+   * Override what initiated this operation. Server defaults to `'chat'` when
+   * omitted. Pass a more specific value (`'cli'`, `'openapi'`, …) so the
+   * `agent_operations.trigger` column reflects the real source.
+   */
+  trigger?: string;
+  userInterventionConfig?: UserInterventionConfig;
 }
 
 /**
@@ -25,6 +157,8 @@ export interface ExecSubAgentTaskParams {
   groupId?: string;
   instruction: string;
   parentMessageId: string;
+  /** Parent operation ID for dispatching callAgent hooks */
+  parentOperationId?: string;
   timeout?: number;
   /** Task title (shown in UI, used as thread title) */
   title?: string;
@@ -38,6 +172,7 @@ export interface GetSubAgentTaskStatusParams {
 export interface InterruptTaskParams {
   operationId?: string;
   threadId?: string;
+  topicId?: string;
 }
 
 /**
@@ -46,6 +181,11 @@ export interface InterruptTaskParams {
  */
 export interface CreateClientTaskThreadParams {
   agentId: string;
+  /**
+   * Seed an assistant placeholder for transports that stream into an existing
+   * message (for example a local heterogeneous CLI).
+   */
+  assistantMessage?: { provider: string };
   groupId?: string;
   /** Initial user message content (task instruction) */
   instruction: string;
@@ -89,11 +229,27 @@ export interface UpdateClientTaskThreadStatusParams {
 }
 
 class AiAgentService {
+  async getServerDefaultHeterogeneousCapability() {
+    return await lambdaClient.aiAgent.getServerDefaultHeterogeneousCapability.query();
+  }
+
   /**
-   * Execute a single Agent task
+   * Execute a single Agent task.
+   * Returns the operationId needed to connect to the Agent Gateway.
    */
-  async execAgentTask(params: ExecAgentTaskParams) {
-    return await lambdaClient.aiAgent.execAgent.mutate(params);
+  async execAgentTask(
+    params: ExecAgentTaskParams,
+    options?: { signal?: AbortSignal },
+  ): Promise<ExecAgentResult> {
+    return await lambdaClient.aiAgent.execAgent.mutate(params, options);
+  }
+
+  /**
+   * Defer an agent run to a future time. Creates an empty `scheduled` topic that
+   * the backend cron fires once `runAt` passes; nothing runs now.
+   */
+  async scheduleAgentRun(params: ScheduleAgentRunParams): Promise<ScheduleAgentRunResult> {
+    return await lambdaClient.aiAgent.scheduleAgentRun.mutate(params);
   }
 
   /**
@@ -102,6 +258,22 @@ class AiAgentService {
    * - Group mode: pass groupId, Thread will be associated with the Group
    * - Single Agent mode: omit groupId, Thread will only be associated with the Agent
    */
+  /**
+   * Get a fresh JWT token for Gateway WebSocket reconnection.
+   */
+  async refreshGatewayToken(topicId: string): Promise<{ token: string }> {
+    return await lambdaClient.aiAgent.refreshGatewayToken.query({ topicId });
+  }
+
+  /**
+   * Mint the per-user JWT for the multiplexed Gateway WebSocket (v2, one
+   * socket per user). Not bound to any operation — the mux client calls this
+   * before every connect attempt.
+   */
+  async issueGatewayUserToken(): Promise<{ token: string }> {
+    return await lambdaClient.aiAgent.issueGatewayUserToken.query();
+  }
+
   async execSubAgentTask(params: ExecSubAgentTaskParams) {
     return await lambdaClient.aiAgent.execSubAgentTask.mutate(params);
   }
@@ -119,6 +291,54 @@ class AiAgentService {
    */
   async interruptTask(params: InterruptTaskParams) {
     return await lambdaClient.aiAgent.interruptTask.mutate(params);
+  }
+
+  /**
+   * Tell a running server operation whether user messages are queued behind it,
+   * so it hands the turn back at its next step boundary.
+   */
+  async setQueuedMessages(params: { operationId: string; pending: boolean }) {
+    return await lambdaClient.aiAgent.setQueuedMessages.mutate(params);
+  }
+
+  /**
+   * Stop a run parked on tool approval: settle the pending tool rows and end
+   * the operation without running anything or continuing the model.
+   *
+   * Not `interruptTask` — that one assumes a live loop will persist the
+   * outcome, which a parked run does not have.
+   */
+  async stopPendingApproval(params: {
+    batchId: string;
+    operationId: string;
+    toolMessageIds: string[];
+    topicId: string;
+  }) {
+    return await lambdaClient.aiAgent.stopPendingApproval.mutate(params);
+  }
+
+  /**
+   * Try the Cloud durable first-winner path for an active Web card. A false
+   * result means this deployment has no generic intervention store and the
+   * caller should use the legacy OSS Gateway resume path.
+   */
+  async resolveAgentInterventionBySource(
+    params: ResolveAgentInterventionBySourceParams,
+  ): Promise<ResolveAgentInterventionBySourceResult> {
+    const result = await lambdaClient.aiAgent.resolveAgentInterventionBySource.mutate(params);
+
+    if (!result.success) return { handled: false };
+
+    return {
+      execution: 'execution' in result ? result.execution : undefined,
+      handled: true,
+      state: result.state,
+    };
+  }
+
+  /** Fetch the authoritative v2 snapshot and view/resolve authorization for an active card. */
+  async getAgentInterventionReviewBySource(params: GetAgentInterventionReviewBySourceParams) {
+    return await lambdaClient.aiAgent.getAgentInterventionReviewBySource.mutate(params);
   }
 
   /**

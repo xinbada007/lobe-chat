@@ -1,10 +1,12 @@
 'use client';
 
-import { Flexbox, Tag } from '@lobehub/ui';
+import { Flexbox } from '@lobehub/ui';
+import { Tag } from '@lobehub/ui/base-ui';
 import { createStaticStyles } from 'antd-style';
-import { Link } from '@/libs/router';
 import qs from 'query-string';
 import { memo } from 'react';
+
+import { Link } from '@/libs/router';
 
 const styles = createStaticStyles(({ css, cssVar }) => {
   return {
@@ -23,16 +25,16 @@ const TagList = memo<{ tags: string[] }>(({ tags }) => {
   const showTags = Boolean(tags?.length && tags?.length > 0);
   return (
     showTags && (
-      <Flexbox gap={8} horizontal wrap={'wrap'}>
+      <Flexbox horizontal gap={8} wrap={'wrap'}>
         {tags.map((tag) => (
           <Link
+            key={tag}
             href={qs.stringifyUrl({
               query: {
                 q: tag,
               },
               url: '/community/mcp',
             })}
-            key={tag}
           >
             <Tag className={styles.tag}>{tag}</Tag>
           </Link>

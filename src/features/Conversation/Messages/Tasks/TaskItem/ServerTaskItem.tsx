@@ -1,13 +1,15 @@
 'use client';
 
-import { AccordionItem, Block } from '@lobehub/ui';
+import { Block } from '@lobehub/ui';
+import { Accordion } from '@lobehub/ui/base-ui';
 import { memo, useMemo, useState } from 'react';
 
+import { type UIChatMessage } from '@/types/index';
 import { ThreadStatus } from '@/types/index';
-import type { UIChatMessage } from '@/types/index';
 
 import { TaskContent } from '../shared';
-import TaskTitle, { type TaskMetrics } from './TaskTitle';
+import { type TaskMetrics } from './TaskTitle';
+import TaskTitle from './TaskTitle';
 
 interface ServerTaskItemProps {
   item: UIChatMessage;
@@ -43,27 +45,33 @@ const ServerTaskItem = memo<ServerTaskItemProps>(({ item }) => {
   ]);
 
   return (
-    <AccordionItem
-      expand={expanded}
-      itemKey={id}
-      onExpandChange={setExpanded}
-      paddingBlock={4}
-      paddingInline={4}
-      title={<TaskTitle metrics={metrics} status={status} title={title} />}
-    >
-      <Block gap={16} padding={12} style={{ marginBlock: 8 }} variant={'outlined'}>
-        {expanded && (
-          <TaskContent
-            id={id}
-            isError={isError}
-            messages={tasks}
-            status={status}
-            taskDetail={taskDetail}
-            threadId={threadId}
-          />
-        )}
-      </Block>
-    </AccordionItem>
+    <Accordion
+      keepMounted
+      indicatorPlacement="inline"
+      styles={{ trigger: { paddingBlock: 4, paddingInline: 4 } }}
+      value={expanded ? [id] : []}
+      items={[
+        {
+          children: (
+            <Block gap={16} padding={12} style={{ marginBlock: 8 }} variant={'outlined'}>
+              {expanded && (
+                <TaskContent
+                  id={id}
+                  isError={isError}
+                  messages={tasks}
+                  status={status}
+                  taskDetail={taskDetail}
+                  threadId={threadId}
+                />
+              )}
+            </Block>
+          ),
+          key: id,
+          title: <TaskTitle metrics={metrics} status={status} title={title} />,
+        },
+      ]}
+      onValueChange={(value) => setExpanded(value.includes(id))}
+    />
   );
 }, Object.is);
 

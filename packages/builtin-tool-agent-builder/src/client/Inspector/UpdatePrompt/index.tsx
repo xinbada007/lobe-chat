@@ -1,7 +1,7 @@
 'use client';
 
 import type { BuiltinInspectorProps } from '@lobechat/types';
-import { Text } from '@lobehub/ui';
+import { Text } from '@lobehub/ui/base-ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
 import { Check } from 'lucide-react';
 import { memo, useMemo } from 'react';
@@ -39,8 +39,10 @@ export const UpdatePromptInspector = memo<
   // Initial streaming state
   if (isArgumentsStreaming && !prompt) {
     return (
-      <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
-        <span>{t('builtins.lobe-agent-builder.apiName.updatePrompt')}</span>
+      <div className={inspectorTextStyles.root}>
+        <span className={shinyTextStyles.shinyText}>
+          {t('builtins.lobe-agent-builder.apiName.updatePrompt')}
+        </span>
       </div>
     );
   }
@@ -50,18 +52,15 @@ export const UpdatePromptInspector = memo<
   const isSuccess = pluginState?.success;
 
   return (
-    <div
-      className={cx(
-        inspectorTextStyles.root,
-        (isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText,
-      )}
-    >
-      <span>{t('builtins.lobe-agent-builder.apiName.updatePrompt')}</span>
+    <div className={inspectorTextStyles.root}>
+      <span className={cx((isArgumentsStreaming || isLoading) && shinyTextStyles.shinyText)}>
+        {t('builtins.lobe-agent-builder.apiName.updatePrompt')}
+      </span>
       {/* Show length diff when completed */}
       {!isLoading && !isArgumentsStreaming && lengthDiff !== null && (
         <Text
-          as={'span'}
           code
+          as={'span'}
           color={lengthDiff >= 0 ? cssVar.colorSuccess : cssVar.colorError}
           fontSize={12}
           style={{ marginInlineStart: 4 }}
@@ -74,8 +73,8 @@ export const UpdatePromptInspector = memo<
       {/* Show streaming length */}
       {(isArgumentsStreaming || isLoading) && streamingLength > 0 && (
         <Text
-          as={'span'}
           code
+          as={'span'}
           color={cssVar.colorTextDescription}
           fontSize={12}
           style={{ marginInlineStart: 4 }}

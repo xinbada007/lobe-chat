@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { useGlobalStore } from '@/store/global';
 import { systemStatusSelectors } from '@/store/global/selectors/systemStatus';
 
-import type { GroupMode } from '../types';
+import { type GroupMode } from '../types';
 
 export const usePanelState = () => {
   const groupMode = useGlobalStore(systemStatusSelectors.modelSwitchPanelGroupMode) as GroupMode;
@@ -11,7 +11,7 @@ export const usePanelState = () => {
 
   const handleGroupModeChange = useCallback(
     (mode: GroupMode) => {
-      updateSystemStatus({ modelSwitchPanelGroupMode: mode });
+      updateSystemStatus({ modelSwitchPanelGroupBy: mode });
     },
     [updateSystemStatus],
   );

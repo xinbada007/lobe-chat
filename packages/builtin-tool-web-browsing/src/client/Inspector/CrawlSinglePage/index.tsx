@@ -19,17 +19,19 @@ export const CrawlSinglePageInspector = memo<BuiltinInspectorProps<CrawlSinglePa
 
     if (isArgumentsStreaming && !url) {
       return (
-        <div className={cx(inspectorTextStyles.root, shinyTextStyles.shinyText)}>
-          <span>{t('builtins.lobe-web-browsing.apiName.crawlSinglePage')}</span>
+        <div className={inspectorTextStyles.root}>
+          <span className={shinyTextStyles.shinyText}>
+            {t('builtins.lobe-web-browsing.apiName.crawlSinglePage')}
+          </span>
         </div>
       );
     }
 
     return (
-      <div
-        className={cx(inspectorTextStyles.root, isArgumentsStreaming && shinyTextStyles.shinyText)}
-      >
-        <span>{t('builtins.lobe-web-browsing.apiName.crawlSinglePage')}: </span>
+      <div className={inspectorTextStyles.root}>
+        <span className={cx(isArgumentsStreaming && shinyTextStyles.shinyText)}>
+          {t('builtins.lobe-web-browsing.apiName.crawlSinglePage')}:{'\u00A0'}
+        </span>
         {url && <span className={highlightTextStyles.gold}>{url}</span>}
       </div>
     );

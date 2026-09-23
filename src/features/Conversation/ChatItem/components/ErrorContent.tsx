@@ -1,12 +1,44 @@
-import { Alert, Skeleton } from '@lobehub/ui';
-import { Button } from 'antd';
+import { Alert, Button, Skeleton } from '@lobehub/ui/base-ui';
+import { createStaticStyles, cx } from 'antd-style';
 import { RotateCcw } from 'lucide-react';
-import { Suspense, memo } from 'react';
+import { memo, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { useConversationStore } from '@/features/Conversation';
+import {
+  dataSelectors,
+  messageStateSelectors,
+  useConversationStore,
+} from '@/features/Conversation/store';
 
 import { type ChatItemProps } from '../type';
+
+const styles = createStaticStyles(({ css }) => ({
+  close: css`
+    @media (width <= 480px) {
+      width: 24px;
+      height: 24px;
+    }
+  `,
+  extraContent: css`
+    padding: 0;
+    background: transparent;
+
+    @media (width <= 480px) {
+      margin-inline: 8px;
+    }
+  `,
+  extraHeader: css`
+    @media (width <= 480px) {
+      padding-inline: 8px;
+    }
+  `,
+  root: css`
+    @media (width <= 480px) {
+      gap: 6px;
+      padding-inline: 8px;
+    }
+  `,
+}));
 
 export interface ErrorContentProps {
   customErrorRender?: ChatItemProps['customErrorRender'];
@@ -17,42 +49,67 @@ export interface ErrorContentProps {
 
 const ErrorContent = memo<ErrorContentProps>(({ customErrorRender, error, id, onRegenerate }) => {
   const { t } = useTranslation('common');
-  const [deleteMessage] = useConversationStore((s) => [s.deleteMessage]);
+  const [deleteMessage, updateMessageError] = useConversationStore((s) => [
+    s.deleteMessage,
+    s.updateMessageError,
+  ]);
+  const messageContent = useConversationStore((s) =>
+    id ? dataSelectors.getDisplayMessageById(id)(s)?.content : undefined,
+  );
+  // The retry can take a while to produce anything visible (branch switch plus a
+  // transport round trip), so the button has to own its own pending state —
+  // otherwise a click reads as "nothing happened" and invites a second one.
+  const retrying = useConversationStore((s) =>
+    id ? messageStateSelectors.isMessageRegenerating(id)(s) : false,
+  );
 
   if (!error) return;
 
   if (customErrorRender) {
-    return (
-      <Suspense fallback={<Skeleton.Button active block />}>{customErrorRender(error)}</Suspense>
-    );
+    return <Suspense fallback={<Skeleton height={36} />}>{customErrorRender(error)}</Suspense>;
   }
 
   return (
     <Alert
+      closable
+      showIcon
+      extraIsolate={false}
+      type={'secondary'}
+      variant={'outlined'}
       action={
         onRegenerate && (
           <Button
-            color="default"
+            disabled={retrying}
             icon={<RotateCcw size={14} />}
-            onClick={onRegenerate}
+            loading={retrying}
             size="small"
-            variant="filled"
+            type="fill"
+            onClick={onRegenerate}
           >
             {t('regenerate')}
           </Button>
         )
       }
-      closable
-      extraDefaultExpand
-      extraIsolate={false}
-      showIcon
-      type={'secondary'}
       {...error}
+      title={error.message}
       afterClose={() => {
         error?.afterClose?.();
-        if (id) {
+        if (!id) return;
+        // A turn can carry a terminal error on top of content it already
+        // streamed. Dismissing the error must not delete that content — just
+        // clear the error and keep the message.
+        if (messageContent && messageContent.trim() !== '') {
+          updateMessageError(id, null);
+        } else {
           deleteMessage(id);
         }
+      }}
+      classNames={{
+        ...error.classNames,
+        close: cx(styles.close, error.classNames?.close),
+        extraContent: cx(styles.extraContent, error.classNames?.extraContent),
+        extraHeader: cx(styles.extraHeader, error.classNames?.extraHeader),
+        root: cx(styles.root, error.classNames?.root),
       }}
       style={{
         overflow: 'hidden',
@@ -60,7 +117,6 @@ const ErrorContent = memo<ErrorContentProps>(({ customErrorRender, error, id, on
         width: '100%',
         ...error.style,
       }}
-      title={error.message}
     />
   );
 });

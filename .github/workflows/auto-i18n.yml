@@ -3,7 +3,7 @@ name: Daily i18n Update
 on:
   schedule:
     - cron: '0 0 * * *'
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 # Add permissions configuration
 permissions:
@@ -16,22 +16,27 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ vars.LOBEHUB_BOT_APP_ID }}
+          private-key: ${{ secrets.LOBEHUB_BOT_APP_PRIVATE_KEY }}
+
       - name: Configure Git
         run: |
           git config --global user.name "lobehubbot"
           git config --global user.email "i@lobehub.com"
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ steps.app-token.outputs.token }}
 
-      - name: Install bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: ${{ secrets.BUN_VERSION }}
+      - name: Setup environment
+        uses: ./.github/actions/setup-env
 
       - name: Install deps
-        run: bun i
+        run: pnpm install
 
       - name: Update i18n
         run: bun run i18n
@@ -43,7 +48,7 @@ jobs:
         id: cpr
         uses: peter-evans/create-pull-request@v7
         with:
-          token: ${{ secrets.GH_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           add-paths: |
             locales/**/*.json
           labels: |

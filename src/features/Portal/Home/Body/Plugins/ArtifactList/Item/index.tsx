@@ -1,5 +1,6 @@
 import { type ChatPluginPayload } from '@lobechat/types';
-import { Flexbox, Icon, Tag, Text } from '@lobehub/ui';
+import { Flexbox, Icon } from '@lobehub/ui';
+import { Tag, Text } from '@lobehub/ui/base-ui';
 import { cx } from 'antd-style';
 import isEqual from 'fast-deep-equal';
 import { CircuitBoard } from 'lucide-react';
@@ -28,25 +29,25 @@ const ArtifactItem = memo<ArtifactItemProps>(({ payload, messageId, identifier =
   const pluginMeta = useToolStore(toolSelectors.getMetaById(identifier), isEqual);
   const isToolHasUI = useToolStore(toolSelectors.isToolHasUI(identifier));
   const openToolUI = useChatStore((s) => s.openToolUI);
-  const pluginTitle = pluginHelpers.getPluginTitle(pluginMeta) ?? t('unknownPlugin');
+  const pluginTitle = pluginHelpers.getPluginTitle(pluginMeta) ?? identifier;
 
   return (
     <Flexbox
+      horizontal
       align={'center'}
       className={styles.container}
       gap={8}
-      horizontal
       onClick={() => {
         if (!isToolHasUI || !identifier) return;
 
         openToolUI(messageId, identifier);
       }}
     >
-      <Flexbox align={'center'} distribution={'space-between'} gap={24} horizontal>
-        <Flexbox align={'center'} gap={8} horizontal>
+      <Flexbox horizontal align={'center'} distribution={'space-between'} gap={24}>
+        <Flexbox horizontal align={'center'} gap={8}>
           <PluginAvatar identifier={identifier} />
           <Flexbox gap={4}>
-            <Flexbox align={'center'} gap={8} horizontal>
+            <Flexbox horizontal align={'center'} gap={8}>
               <div>{pluginTitle}</div>
               <Tag>{payload?.apiName}</Tag>
             </Flexbox>

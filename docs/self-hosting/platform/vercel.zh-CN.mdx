@@ -252,6 +252,145 @@ tags:
   <Image alt={'登录成功状态'} src={'/blog/assets28616219/9cb5150d-6e1e-4c59-9a18-4e418dce1a5d.webp'} />
 </Steps>
 
+## 可选：使用 GitHub Actions 预构建
+
+如果 Vercel 构建因内存不足或超过构建时限而失败，可以改在 GitHub Actions 中运行 `vercel build`，再通过 `vercel deploy --prebuilt` 将 `.vercel/output` 构建产物部署到 Vercel。该流程遵循 Vercel 官方的 [GitHub Actions 部署方式](https://vercel.com/guides/how-can-i-use-github-actions-with-vercel)。
+
+<Callout type={'info'}>
+  此方式只将构建阶段移到 GitHub Actions。部署后的函数运行时、流量和套餐配额仍受 Vercel 限制。如果 Vercel 原生 Git 部署可以正常完成，则无需改用此方式。
+</Callout>
+
+<Steps>
+  ### 准备 Vercel 凭据
+
+  准备以下三个值：
+
+  - `VERCEL_TOKEN`：在 Vercel 的 [Tokens](https://vercel.com/account/settings/tokens) 页面创建；
+  - `VERCEL_ORG_ID` 和 `VERCEL_PROJECT_ID`：在仓库根目录执行 `vercel link` 后，可从生成的 `.vercel/project.json` 中获取。
+
+  在 Fork 仓库中进入 **Settings → Secrets and variables → Actions**，分别创建同名的 Repository secrets。请勿将这些值直接写入工作流文件。
+
+  ### 添加 GitHub Actions 工作流
+
+  在 Fork 仓库中新建 `.github/workflows/vercel-prebuilt-deploy.yml`，写入以下内容：
+
+  ```yaml
+  name: Vercel Prebuilt Deploy
+
+  on:
+    push:
+      branches:
+        - main
+    workflow_dispatch:
+
+  permissions:
+    contents: read
+
+  concurrency:
+    group: vercel-production
+    cancel-in-progress: true
+
+  env:
+    VERCEL: '1'
+    VERCEL_ENV: production
+    NEXT_PUBLIC_VERCEL_ENV: production
+    VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+    VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+  jobs:
+    deploy:
+      runs-on: ubuntu-latest
+      timeout-minutes: 90
+
+      steps:
+        - name: Checkout repository
+          uses: actions/checkout@v6
+
+        - name: Setup environment
+          uses: ./.github/actions/setup-env
+
+        - name: Install Vercel CLI
+          run: npm install --global vercel@latest
+
+        - name: Pull Vercel project settings
+          env:
+            VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+        - name: Build Vercel output
+          env:
+            VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          run: vercel build --prod --token="$VERCEL_TOKEN"
+
+        - name: Deploy prebuilt output
+          env:
+            VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          run: vercel deploy --prebuilt --prod --archive=tgz --token="$VERCEL_TOKEN"
+  ```
+
+  每次向 `main` 分支推送代码后，该工作流都会自动构建并部署。你也可以在 **Actions → Vercel Prebuilt Deploy → Run workflow** 中手动触发。
+
+  仓库内置的 **Upstream Sync** 工作流使用 `GITHUB_TOKEN` 推送，而[这种推送不会启动另一个工作流](https://docs.github.com/zh-cn/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)。Upstream Sync 更新 Fork 后，请手动运行 **Vercel Prebuilt Deploy** 部署新版本。
+
+  ### 关闭 Vercel 原生 Git 部署
+
+  确认上述工作流可以成功部署后，在 Vercel 项目的 **Settings → Git → Connected Git Repository** 中断开 Git 仓库连接，避免同一次推送同时触发 Vercel 原生构建和 GitHub Actions 构建。断开连接不会影响通过 Vercel CLI 部署预构建产物。
+
+  ### 验证部署
+
+  打开 GitHub Actions 的运行详情。`Deploy prebuilt output` 步骤会输出生产部署地址；访问该地址并按上一节检查登录功能。
+</Steps>
+
+## 平台限制
+
+<Callout type={'warning'}>
+  部署前请了解 Vercel 平台的以下限制。
+</Callout>
+
+**Serverless 函数超时：**
+
+| 套餐         | 超时时间  |
+| ---------- | ----- |
+| Hobby      | 10 秒  |
+| Pro        | 60 秒  |
+| Enterprise | 900 秒 |
+
+在 Hobby 套餐上，长时间运行的 AI 请求可能会超时。默认启用的流式响应有助于保持连接活跃。
+
+**不支持 WebSocket** — Vercel Serverless 函数不支持持久 WebSocket 连接，实时功能使用服务端发送事件（SSE）代替。
+
+**冷启动** — Serverless 函数在空闲后的首次请求可能较慢（1–3 秒），这是 Serverless 平台的正常行为。
+
+**文件大小限制** — 部署包：250 MB（压缩后）；函数包：50 MB。
+
+## 保持版本更新
+
+<Callout type={'warning'}>
+  如果你使用了一键部署按钮，Vercel 会创建一个**全新的**仓库，而非 Fork 原始仓库。这会导致无法自动同步上游更新。
+</Callout>
+
+若要接收 LobeHub 的后续更新：
+
+1. 在 Vercel 控制台**删除**当前项目（设置 → 删除项目）
+2. 在 GitHub 上手动 **Fork** [lobehub/lobehub](https://github.com/lobehub/lobehub)
+3. 将 Fork 后的仓库**导入**到 Vercel（新增项目 → 导入）
+4. 重新配置环境变量并部署
+5. 在 Fork 仓库的 GitHub **Actions** 标签页，启用 `upstream-sync` 工作流 —— 它会每日自动检查上游更新
+
+手动同步：Actions → Upstream Sync → Run workflow。
+
+## 故障排查
+
+**部署失败** — 在 Vercel 控制台 → 部署记录 → 点击失败的部署 → 构建日志中查看详情。常见原因：环境变量缺失、TypeScript 报错、内存不足（通过 `NODE_OPTIONS=--max-old-space-size=4096` 修复）。
+
+**函数超时** — 在 Hobby 套餐遇到超时时：升级到 Pro（60 秒超时）、使用更快的模型（如 GPT-4o-mini 代替 GPT-4o）、减少最大 token 数，或确认已启用流式响应。
+
+**数据库连接失败** — 检查 `DATABASE_URL` 格式。对于托管数据库，确保末尾追加了 `?sslmode=require`。检查数据库 IP 白名单是否包含 Vercel IP（或使用 `0.0.0.0/0` 开放访问）。本地测试：`psql "$DATABASE_URL"`。
+
+**502 网关错误** — 常见原因：函数超时、内存溢出、数据库连接池耗尽。使用连接池（PgBouncer）、减少并发连接数或查看数据库日志。
+
+**环境变量修改后未生效** — 在部署记录中点击某次部署的三点菜单 → 重新部署，选择 "不使用现有构建缓存"。
+
 ## 附录
 
 ### 服务端数据库环境变量一览

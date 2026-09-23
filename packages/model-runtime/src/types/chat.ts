@@ -1,6 +1,13 @@
-import { ModelPerformance, ModelTokensUsage, ModelUsage } from '@lobechat/types';
+import type {
+  ModelPerformance,
+  ModelReasoning,
+  ModelTokensUsage,
+  ModelUsage,
+} from '@lobechat/types';
 
-import { MessageToolCall, MessageToolCallChunk } from './toolsCalling';
+import type { ModelPricingContext } from './pricing';
+import type { ModelRuntimeDiagnostics } from './providerDiagnostics';
+import type { MessageToolCall, MessageToolCallChunk } from './toolsCalling';
 
 export type LLMRoleType = 'user' | 'system' | 'assistant' | 'function' | 'tool';
 
@@ -20,6 +27,10 @@ interface UserMessageContentPartThinking {
   thinking: string;
   type: 'thinking';
 }
+interface UserMessageContentPartRedactedThinking {
+  data: string;
+  type: 'redacted_thinking';
+}
 interface UserMessageContentPartText {
   text: string;
   type: 'text';
@@ -37,20 +48,31 @@ interface UserMessageContentPartVideo {
   type: 'video_url';
   video_url: { url: string };
 }
+interface UserMessageContentPartAudio {
+  audio_url: {
+    codec?: string;
+    durationMs?: number;
+    mimeType?: string;
+    url: string;
+  };
+  type: 'audio_url';
+}
 
 export type UserMessageContentPart =
   | UserMessageContentPartText
   | UserMessageContentPartImage
   | UserMessageContentPartVideo
-  | UserMessageContentPartThinking;
+  | UserMessageContentPartAudio
+  | UserMessageContentPartThinking
+  | UserMessageContentPartRedactedThinking;
 
 export interface OpenAIChatMessage {
   content: string | UserMessageContentPart[];
+  model?: string;
   name?: string;
-  reasoning?: {
-    content?: string;
-    duration?: number;
-  };
+  provider?: string;
+  reasoning?: ModelReasoning;
+  reasoning_content?: string;
   role: LLMRoleType;
   tool_call_id?: string;
   tool_calls?: MessageToolCall[];
@@ -61,6 +83,11 @@ export interface OpenAIChatMessage {
  */
 export interface ChatStreamPayload {
   apiMode?: 'chatCompletion' | 'responses';
+  /**
+   * @title Provider deployment name
+   */
+  deploymentName?: string;
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   /**
    * Enable context caching
    */
@@ -79,9 +106,10 @@ export interface ChatStreamPayload {
    */
   imageAspectRatio?: string;
   /**
-   * @title Image resolution for image generation (e.g., '1K', '2K', '4K')
+   * @title Image resolution for image generation (e.g., '512', '1K', '2K', '4K')
    */
-  imageResolution?: '1K' | '2K' | '4K';
+  imageResolution?: '512' | '1K' | '2K' | '4K';
+  logprobs?: boolean;
   /**
    * @title Maximum length of generated text
    */
@@ -117,14 +145,16 @@ export interface ChatStreamPayload {
    * @default 0
    */
   presence_penalty?: number;
+  preserveThinking?: boolean;
   provider?: string;
   reasoning?: {
     effort?: string;
+    mode?: 'standard' | 'pro';
     summary?: string;
   };
-  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high';
-  responseMode?: 'stream' | 'json';
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   response_format?: ChatResponseFormat;
+  responseMode?: 'stream' | 'json';
   /**
    * @title Whether to enable streaming requests
    * @default true
@@ -142,20 +172,29 @@ export interface ChatStreamPayload {
    * use for Claude and Gemini
    */
   thinking?: {
-    budget_tokens: number;
-    type: 'enabled' | 'disabled';
+    budget_tokens?: number;
+    /**
+     * Controls whether the summarized reasoning text is returned. Defaults to `omitted` on
+     * Claude Fable 5 / Opus 5 / Sonnet 5 / Opus 4.8 / Opus 4.7, where thinking blocks then
+     * arrive with an empty `thinking` field and no `thinking_delta` events while streaming.
+     * Invalid together with `type: 'disabled'`.
+     * @see https://platform.claude.com/docs/en/build-with-claude/thinking#controlling-thinking-display
+     */
+    display?: 'omitted' | 'summarized';
+    type?: 'enabled' | 'disabled' | 'adaptive';
   };
   thinkingBudget?: number;
   /**
    * Thinking level for Gemini models (e.g., gemini-3.0-pro)
    */
-  thinkingLevel?: 'low' | 'high';
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
   tool_choice?: string;
   tools?: ChatCompletionTool[];
   /**
    * @title Controls the highest probability single token in generated text
    * @default 1
    */
+  top_logprobs?: number;
   top_p?: number;
   truncation?: 'auto' | 'disabled';
   /**
@@ -168,9 +207,19 @@ export interface ChatStreamPayload {
 export interface ChatMethodOptions {
   callback?: ChatStreamCallbacks;
   /**
+   * Request-scoped provider-boundary evidence retained by the caller.
+   * Keep this separate from metadata because routing hooks may retain metadata
+   * after the provider returns, while diagnostics can contain a large payload.
+   */
+  diagnostics?: ModelRuntimeDiagnostics;
+  /**
    * response headers
    */
   headers?: Record<string, any>;
+  /** Metadata passed to hooks (billing, tracing, etc.) */
+  metadata?: Record<string, unknown>;
+  /** Request-scoped pricing context for model-bank pricing lookups. */
+  pricingContext?: ModelPricingContext;
   /**
    * send the request to the ai api endpoint
    */
@@ -215,12 +264,43 @@ export interface ChatCompletionTool {
 }
 
 export interface OnFinishData {
+  error?: any;
+  /**
+   * The terminal finishReason emitted by the provider in the `stop` SSE chunk
+   * (e.g. Google: STOP / SAFETY / RECITATION / MAX_TOKENS; OpenAI: stop / length;
+   * Anthropic: end_turn / max_tokens / tool_use). Used to detect "soft interrupts"
+   * where the provider returns empty content with a non-normal finishReason.
+   */
+  finishReason?: string;
   grounding?: any;
+  reasoning?: ModelReasoning;
+  /** Stable identities and terminal outcome for the provider attempt producing this result. */
+  routeAttempt?: {
+    attemptId: string;
+    outcome?: 'completed' | 'empty' | 'interrupted' | 'cancelled' | 'failed';
+    requestId: string;
+  };
   speed?: ModelPerformance;
   text: string;
   thinking?: string;
   toolsCalling?: MessageToolCall[];
   usage?: ModelUsage;
+  usageMissingDiagnostics?: UsageMissingDiagnostics;
+}
+
+export interface UsageMissingDiagnostics {
+  apiMode?: 'chat_completions' | 'messages' | 'responses';
+  chunkIndex?: number;
+  finishReason?: string | null;
+  hasUsageMetadata: boolean;
+  includeUsageRequested?: boolean;
+  model?: string;
+  provider?: string;
+  responseId?: string;
+  source:
+    'anthropic_messages' | 'google_generative_ai' | 'openai_chat_completions' | 'openai_responses';
+  terminalEventType: string;
+  terminalStatus?: string;
 }
 
 /**
@@ -264,6 +344,8 @@ export interface ChatStreamCallbacks {
    * Used for models that return structured content with mixed text and images.
    */
   onContentPart?: (data: ContentPartData) => Promise<void> | void;
+  /** `onError`: Called when a stream error event is received from the provider. */
+  onError?: (error: any) => Promise<void> | void;
   /**
    * `onFinal`: Called once when the stream is closed with the final completion message.
    **/

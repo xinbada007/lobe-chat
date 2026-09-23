@@ -1,24 +1,25 @@
+import type { IEditor } from '@lobehub/editor';
 import {
   CommonPlugin,
-  type IEditor,
   Kernel,
   ListPlugin,
   LitexmlPlugin,
   MarkdownPlugin,
   moment,
 } from '@lobehub/editor';
+import type { Mock } from 'vitest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { EditorRuntime } from '../EditorRuntime';
 import editAllFixture from './fixtures/edit-all.json';
-import removeThenAddFixture from './fixtures/remove-then-add.json';
 import removeFixture from './fixtures/remove.json';
+import removeThenAddFixture from './fixtures/remove-then-add.json';
 
 describe('EditorRuntime - Real Cases', () => {
   let runtime: EditorRuntime;
   let editor: IEditor;
-  let mockTitleSetter: ReturnType<typeof vi.fn>;
-  let mockTitleGetter: ReturnType<typeof vi.fn>;
+  let mockTitleSetter: Mock<(title: string) => void>;
+  let mockTitleGetter: Mock<() => string>;
 
   beforeEach(() => {
     editor = new Kernel() as unknown as IEditor;

@@ -1,14 +1,10 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { getTestDB } from '../../../core/getTestDB';
-import {
-  NewUserMemoryActivity,
-  userMemories,
-  userMemoriesActivities,
-  users,
-} from '../../../schemas';
-import { LobeChatDatabase } from '../../../type';
+import type { NewUserMemoryActivity } from '../../../schemas';
+import { userMemories, userMemoriesActivities, users } from '../../../schemas';
+import type { LobeChatDatabase } from '../../../type';
 import { UserMemoryActivityModel } from '../activity';
 
 const userId = 'activity-test-user';
@@ -240,28 +236,60 @@ describe('UserMemoryActivityModel', () => {
       expect(result.pageSize).toBe(100);
     });
 
-    it('should search by query in title', async () => {
+    it('hydrates external keyword candidates through current user and filter constraints', async () => {
+      const ftsSearchCandidates = vi.fn().mockResolvedValue({
+        candidates: [
+          { id: 'other-list-activity', score: 12 },
+          { id: 'deleted-list-activity', score: 10 },
+          { id: 'list-activity-2', score: 8 },
+          { id: 'list-activity-1', score: 6 },
+        ],
+        total: 4,
+      });
+      const model = new UserMemoryActivityModel(serverDB, userId, {
+        ftsSearchCandidateEnabled: true,
+        ftsSearchCandidates,
+      });
+
+      const result = await model.queryList({ q: 'candidate', status: ['completed'] });
+
+      expect(result.items.map(({ id }) => id)).toEqual(['list-activity-1']);
+      expect(result.total).toBe(1);
+      expect(ftsSearchCandidates).toHaveBeenCalledWith({
+        entity: 'memoryActivities',
+        filters: { memoryStatus: ['completed'] },
+        pagination: {},
+        query: {
+          fields: ['parent_title', 'narrative', 'notes', 'feedback'],
+          text: 'candidate',
+        },
+      });
+    });
+
+    // BM25 search requires pg_search extension (ParadeDB), not available in PGlite
+    const isServerDB = process.env.TEST_SERVER_DB === '1';
+    it.skipIf(!isServerDB)('should search by query in title', async () => {
       const result = await activityModel.queryList({ q: 'Search Test' });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe('list-activity-3');
     });
 
-    it('should search by query in narrative', async () => {
+    it.skipIf(!isServerDB)('should search by query in narrative', async () => {
       const result = await activityModel.queryList({ q: 'Searchable narrative' });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe('list-activity-3');
     });
 
-    it('should search by query in notes', async () => {
+    it.skipIf(!isServerDB)('should search by query in notes', async () => {
       const result = await activityModel.queryList({ q: 'Some notes' });
 
       expect(result.items).toHaveLength(1);
       expect(result.items[0].id).toBe('list-activity-1');
     });
 
-    it('should search by query in feedback', async () => {
+    it.skipIf(!isServerDB)('should search by query in feedback', async () => {
       const result = await activityModel.queryList({ q: 'Some feedback' });
 
       expect(result.items).toHaveLength(1);

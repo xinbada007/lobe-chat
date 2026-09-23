@@ -3,10 +3,12 @@
 import { ChatInput, ChatInputActionBar } from '@lobehub/editor/react';
 import { Flexbox } from '@lobehub/ui';
 import { createStaticStyles, cssVar, cx } from 'antd-style';
-import dynamic from '@/libs/next/dynamic';
 import { memo } from 'react';
 
+import ChatInputNotice from '@/features/ChatInput/ChatInputNotice';
+import ComposerExpandButton from '@/features/ChatInput/components/ComposerExpandButton';
 import { useChatInputStore } from '@/features/ChatInput/store';
+import dynamic from '@/libs/next/dynamic';
 
 import ActionBar from '../ActionBar';
 import InputEditor from '../InputEditor';
@@ -27,6 +29,19 @@ const styles = createStaticStyles(({ css }) => ({
 
     background: ${cssVar.colorBgLayout};
   `,
+  leftActions: css`
+    flex: none;
+    min-width: 0;
+
+    > * {
+      flex: none !important;
+    }
+  `,
+  leftSlot: css`
+    overflow: hidden;
+    flex: 1;
+    min-width: 0;
+  `,
 }));
 
 const DesktopChatInput = memo(() => {
@@ -40,22 +55,37 @@ const DesktopChatInput = memo(() => {
       {!expand && fileNode}
       <Flexbox
         className={cx(styles.container, expand && styles.fullscreen)}
+        gap={8}
         paddingBlock={'0 12px'}
         paddingInline={12}
       >
         <ChatInput
+          fullscreen={expand}
+          slashMenuRef={slashMenuRef}
           footer={
             <ChatInputActionBar
               left={<div />}
-              right={<SendArea />}
+              right={<SendArea hideContextWindow={false} />}
               style={{
                 paddingRight: 8,
               }}
             />
           }
-          fullscreen={expand}
-          header={<ChatInputActionBar left={<ActionBar />} />}
-          slashMenuRef={slashMenuRef}
+          header={
+            <ChatInputActionBar
+              left={
+                <Flexbox horizontal align={'center'} className={styles.leftSlot} gap={4}>
+                  <Flexbox horizontal align={'center'} flex={'none'} gap={2}>
+                    <Flexbox horizontal align={'center'} className={styles.leftActions}>
+                      <ActionBar disableCollapse />
+                    </Flexbox>
+                    <ComposerExpandButton />
+                  </Flexbox>
+                  <ChatInputNotice />
+                </Flexbox>
+              }
+            />
+          }
         >
           {expand && fileNode}
           <InputEditor defaultRows={1} />

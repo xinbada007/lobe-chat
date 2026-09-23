@@ -6,12 +6,15 @@ import { createRemarkSelfClosingTagPlugin } from '../remarkPlugins/createRemarkS
 import { type MarkdownElement, type MarkdownElementProps } from '../type';
 import RenderComponent from './Render';
 
-// 定义此元素的标签名
+// Define the tag name for this element
 
 const LocalFileElement: MarkdownElement = {
   Component: RenderComponent as FC<MarkdownElementProps>,
   remarkPlugin: createRemarkSelfClosingTagPlugin(LOCAL_FILE_TAG),
-  scope: 'assistant',
+  // The chat input serializes attached files to `<localFile … />`, so user
+  // messages rendered from plain markdown (history replay / sync / share)
+  // need this plugin too — not only assistant output.
+  scope: 'all',
   tag: LOCAL_FILE_TAG,
 };
 
