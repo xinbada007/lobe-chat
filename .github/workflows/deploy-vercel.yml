@@ -33,8 +33,11 @@ jobs:
           version: latest
 
       - name: 5. Install dependencies
-        run: pnpm install
-
+        run: |
+          echo "public-hoist-pattern[]=*zod-openapi*" >> .npmrc
+          pnpm install --no-frozen-lockfile
+          pnpm add -D -w zod-openapi --no-frozen-lockfile
+        
       - name: 6. Install Vercel CLI
         run: npm install --global vercel@latest
 
